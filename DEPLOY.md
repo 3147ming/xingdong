@@ -9,19 +9,19 @@
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `https://github.com/3147ming/ming-games` |
-| 本游戏分支 | **`warehouse-strike`** |
+| 仓库 | `https://github.com/3147ming/xingdong` |
+| 分支 | **`master`**（本仓库专属于本游戏） |
 | 站点根 | 分支根目录（`index.html` 所在目录） |
-| 本地分支 | `master`（推送时用 `git push origin master:warehouse-strike`） |
+| 本地分支 | `master`（直接 `git push origin master`） |
 
-> ⚠️ `master` 分支是多游戏首页（`index.html` + 各游戏目录），**不要**把本游戏直接推到 `master`，否则会覆盖首页。
+> 旧仓库 `3147ming/ming-games` 与旧 Pages 项目已弃用。
 
 ### 推送更新
 
 ```bash
 git add -A
 git commit -m "feat: ..."
-git push origin master:warehouse-strike
+git push origin master
 ```
 
 推送后 Cloudflare Pages 会自动重新部署。
@@ -31,13 +31,13 @@ git push origin master:warehouse-strike
 ## 二、Cloudflare Pages 配置
 
 1. 打开 <https://dash.cloudflare.com> → Workers & Pages → Create → Pages → Connect to Git
-2. 选择仓库 `3147ming/ming-games`，授权后：
-   - **Production branch**：`warehouse-strike`
+2. 选择仓库 `3147ming/xingdong`，授权后：
+   - **Production branch**：`master`
    - **Framework preset**：`None`
    - **Build command**：留空
    - **Build output directory**：`/`
 3. Save and Deploy
-4. 得到形如 `https://warehouse-strike.pages.dev` 的地址，HTTPS 自动开启
+4. 得到形如 `https://xingdong.pages.dev` 的地址，HTTPS 自动开启
 
 `_headers` 文件会被 Cloudflare Pages 自动识别，用于设置缓存策略。
 
@@ -50,8 +50,8 @@ Pages 项目 → Custom domains → 添加域名，CF 会自动签发证书。
 
 仓库 Settings → Pages：
 - Source 选 `Deploy from a branch`
-- Branch 选 `warehouse-strike`，目录选 `/ (root)`
-- 访问 `https://3147ming.github.io/ming-games/`
+- Branch 选 `master`，目录选 `/ (root)`
+- 访问 `https://3147ming.github.io/xingdong/`
 
 `.nojekyll` 已存在，GitHub Pages 不会走 Jekyll 处理。
 
@@ -145,7 +145,7 @@ tools/                      check.mjs / probe.mjs
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| 页面 404 | Pages 分支或根目录选错 | 确认分支 = `warehouse-strike`，输出目录 = `/` |
+| 页面 404 | Pages 分支或根目录选错 | 确认分支 = `master`，输出目录 = `/` |
 | 资源加载失败 | 漏推 `public/` 或 `vendor/` | 检查分支根目录文件是否完整 |
 | 加载卡在某个百分比 | 某资源 404 | F12 → Network 查看具体文件名 |
 | 点击开始鼠标没锁定 | 用了 HTTP | 换 HTTPS 地址 |
