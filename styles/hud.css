@@ -1416,6 +1416,150 @@ html, body {
 .growth-body { flex: 1; overflow-y: auto; min-height: 260px; }
 .growth-hint { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .growth-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+
+/* =========================== 3D 大厅 HUD =========================== */
+.lobby-hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+
+.lh-top {
+  position: absolute;
+  top: 20px; left: 26px; right: 26px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.lh-brand {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 14px 8px 16px;
+  background: linear-gradient(90deg, rgba(8, 12, 16, 0.82), rgba(8, 12, 16, 0.28));
+  border-left: 3px solid var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+}
+.lh-brand b { font-size: 20px; letter-spacing: 8px; color: #fff; }
+.lh-brand span { font-size: 9px; letter-spacing: 3px; color: var(--muted); }
+
+.lh-res {
+  display: flex; align-items: center; gap: 16px;
+  padding: 9px 18px;
+  background: rgba(8, 12, 16, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+.lh-res-item { display: flex; align-items: center; gap: 7px; }
+.lh-res-item .res-dot { width: 8px; height: 8px; }
+.lh-res-item b { font-size: 14px; color: #fff; font-family: Consolas, "Courier New", monospace; letter-spacing: 1px; }
+
+.lh-hint {
+  align-self: flex-start;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--muted);
+  padding: 9px 14px;
+  background: rgba(8, 12, 16, 0.6);
+  border-radius: 4px;
+}
+.lh-hint b { color: var(--accent); }
+
+.lh-interact {
+  position: absolute;
+  left: 50%; bottom: 118px;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px 10px 12px;
+  background: rgba(8, 12, 16, 0.86);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  animation: lhInteractIn 0.18s ease-out;
+}
+.lh-interact b {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  font-size: 13px;
+  color: #0a0d10;
+  background: var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 0 12px rgba(255, 176, 32, 0.55);
+}
+.lh-interact span { font-size: 13px; letter-spacing: 2px; color: var(--text); }
+@keyframes lhInteractIn {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.lh-foot {
+  position: absolute; left: 50%; bottom: 42px;
+  transform: translateX(-50%);
+  font-size: 11px; letter-spacing: 1px; color: var(--muted);
+  opacity: 0.75;
+}
+
+/* 大厅十字准星：用于对准设施 */
+.lh-reticle {
+  position: absolute; left: 50%; top: 50%;
+  width: 6px; height: 6px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+/* 入口遮罩：必须点击一次才能锁定鼠标 */
+.lobby-entry {
+  position: fixed; inset: 0; z-index: 32;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(38, 50, 62, 0.30), rgba(3, 5, 8, 0.72) 78%);
+  backdrop-filter: blur(1px);
+}
+.lh-entry-card {
+  text-align: center;
+  padding: 34px 52px 30px;
+  border: 1px solid var(--border);
+  background: rgba(8, 12, 16, 0.82);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
+  animation: lhEntry 2.6s ease-in-out infinite;
+}
+.lh-entry-card .game-title { font-size: clamp(30px, 4.6vw, 52px); letter-spacing: 12px; }
+.lh-entry-card .game-sub { margin-top: 8px; font-size: 11px; letter-spacing: 6px; color: var(--muted); }
+.lh-entry-hint {
+  margin-top: 26px;
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: var(--accent);
+}
+@keyframes lhEntry {
+  0%, 100% { box-shadow: 0 0 0 rgba(255, 176, 32, 0); }
+  50% { box-shadow: 0 0 38px rgba(255, 176, 32, 0.16); }
+}
+
+/* 大厅面板的「返回大厅」按钮 */
+.lobby-close {
+  pointer-events: auto;
+  align-self: flex-end;
+  padding: 9px 18px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--accent);
+  background: rgba(255, 176, 32, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.lobby-close:hover { background: rgba(255, 176, 32, 0.2); color: #fff; }
+
+@media (max-width: 760px) {
+  .lh-top { top: 12px; left: 14px; right: 14px; flex-wrap: wrap; gap: 8px; }
+  .lh-brand b { font-size: 16px; letter-spacing: 5px; }
+  .lh-hint { display: none; }
+  .lh-res { padding: 7px 12px; gap: 10px; }
+  .lh-interact { bottom: 92px; padding: 8px 14px 8px 9px; }
+  .lh-foot { display: none; }
+}
+
 .growth-card-item {
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.07);

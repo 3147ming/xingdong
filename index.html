@@ -116,6 +116,32 @@
   <!-- 帧率调试面板（按 O 切换 / ?debug=1 默认显示） -->
   <div id="fps-panel" class="fps-panel hidden">FPS <b id="fps-value">--</b></div>
 
+  <!-- ===================== 3D 大厅 HUD ===================== -->
+  <div id="lobby-hud" class="lobby-hud hidden">
+    <div class="lh-top">
+      <div class="lh-brand"><b>行动</b><span>OPERATION</span></div>
+      <div class="lh-res">
+        <span class="lh-res-item"><i class="res-dot core"></i><b id="lh-cores">0</b></span>
+        <span class="lh-res-item"><i class="res-dot coin"></i><b id="lh-coins">0</b></span>
+        <span class="lh-res-item"><i class="res-dot rep"></i><b id="lh-rep">0</b></span>
+      </div>
+      <div class="lh-hint"><b>WASD</b> 移动 · <b>Shift</b> 疾跑 · <b>F</b> 交互 · <b>TAB</b> 全部面板</div>
+    </div>
+    <div id="lobby-interact" class="lh-interact hidden">
+      <b>F</b><span id="lobby-interact-name">打开设施</span>
+    </div>
+    <div class="lh-foot">走近设施按 F 打开 · 鼠标未锁定时点击画面继续</div>
+  </div>
+
+  <!-- 大厅入口遮罩：需要一次点击手势才能锁定鼠标 -->
+  <div id="lobby-entry" class="lobby-entry hidden">
+    <div class="lh-entry-card">
+      <h1 class="game-title">行动</h1>
+      <p class="game-sub">OPERATION · 丧尸生存</p>
+      <p class="lh-entry-hint">点击进入基地大厅</p>
+    </div>
+  </div>
+
   <!-- ===================== 加载界面 ===================== -->
   <div id="loading" class="overlay">
     <div class="panel loading-panel">
@@ -140,6 +166,7 @@
           <span class="res-item"><i class="res-dot coin"></i>金币 <b id="lobby-coins">0</b></span>
           <span class="res-item"><i class="res-dot rep"></i>声望 <b id="lobby-rep">0</b></span>
         </div>
+        <button class="lobby-close" id="btn-close-lobby">返回大厅</button>
       </header>
 
       <div class="lobby-body">

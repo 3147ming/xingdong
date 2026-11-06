@@ -61,6 +61,13 @@ export class Menu {
         this.callbacks.onMenu && this.callbacks.onMenu();
       });
     }
+    // 大厅面板：关闭后回到 3D 漫游
+    const btnCloseLobby = document.getElementById('btn-close-lobby');
+    if (btnCloseLobby) {
+      btnCloseLobby.addEventListener('click', () => {
+        this.callbacks.onCloseLobby && this.callbacks.onCloseLobby();
+      });
+    }
   }
 
   setLoading(percent, text) {
@@ -72,13 +79,29 @@ export class Menu {
     this.loading.classList.add('hidden');
   }
 
+  /** 加载完成：关闭加载界面，进入 3D 大厅（面板默认隐藏，可自由漫游） */
   showStart() {
     this.hideLoading();
-    this.menu.classList.remove('hidden');
+    this.hideAll();
+    if (this.lobby) this.lobby.resetTab();
+  }
+
+  /** 打开大厅面板并切到指定页签（由 3D 设施交互 / TAB 触发） */
+  showLobbyPanel(tab) {
+    this.hideLoading();
     this.pause.classList.add('hidden');
     if (this.result) this.result.classList.add('hidden');
-    // 每次回到大厅默认停在作战页
-    if (this.lobby) this.lobby.resetTab();
+    this.menu.classList.remove('hidden');
+    if (this.lobby) this.lobby.showTab(tab || 'battle');
+  }
+
+  /** 关闭大厅面板，交还 3D 漫游 */
+  hideLobbyPanel() {
+    this.menu.classList.add('hidden');
+  }
+
+  get lobbyPanelVisible() {
+    return !this.menu.classList.contains('hidden');
   }
 
   showPause() {

@@ -58,7 +58,10 @@ export class Input {
     // 键盘
     window.addEventListener('keydown', (e) => {
       const code = e.code;
-      // 防止空格滚动页面 / Tab 切换焦点 / 游戏中浏览器快捷键生效
+      // TAB 在本作里被绑定为「大厅面板」键：任何状态下都拦截浏览器焦点导航，
+      // 否则面板打开时（input.enabled=false）按 TAB 会一边关面板、一边把焦点跳到别处。
+      if (code === 'Tab') e.preventDefault();
+      // 防止空格滚动页面 / 游戏中浏览器快捷键生效
       if (this.enabled) {
         const blocked = this._boundCodes.has(code)
           || BLOCK_FUNCTION_KEYS.has(code)

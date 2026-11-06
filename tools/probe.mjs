@@ -53,10 +53,25 @@ try {
   await c.frame(2);
 
   section('A. 启动与资源加载');
-  const ready = await c.waitFor('window.__game && window.__game.state === "menu"', 60000);
-  rec('进入菜单（资源全部加载完成）', ready, ready ? '' : String(await txt(c, 'window.__game && window.__game.state')));
+  const ready = await c.waitFor('window.__game && window.__game.state === "lobby"', 60000);
+  rec('加载完成并进入 3D 大厅', ready, ready ? '' : String(await txt(c, 'window.__game && window.__game.state')));
   rec('加载界面已隐藏', String(await txt(c, 'document.getElementById("loading").classList.contains("hidden")')) === 'true');
-  rec('菜单可见', String(await txt(c, '!document.getElementById("menu").classList.contains("hidden")')) === 'true');
+  rec('大厅 HUD 可见', String(await txt(c, '!document.getElementById("lobby-hud").classList.contains("hidden")')) === 'true');
+  rec('入口遮罩显示（等待点击锁定鼠标）',
+    String(await txt(c, '!document.getElementById("lobby-entry").classList.contains("hidden")')) === 'true');
+  const lobbyInfo = await c.evaluate(`(() => {
+    const g = window.__game.lobby;
+    return {
+      stations: g.stations.length,
+      pos: [Math.round(g.player.pos.x * 100) / 100, Math.round(g.player.pos.z * 100) / 100],
+      hasCamera: !!g.camera,
+      sceneChildren: g.scene.children.length,
+      menuHidden: document.getElementById('menu').classList.contains('hidden'),
+    };
+  })()`);
+  rec('大厅布置 9 处设施（独立 3D 场景）',
+    lobbyInfo.stations === 9 && lobbyInfo.hasCamera && lobbyInfo.sceneChildren > 20, JSON.stringify(lobbyInfo));
+  rec('大厅默认不显示 HTML 面板', lobbyInfo.menuHidden === true);
   const texOk = await c.evaluate(`(() => {
     const t = window.__game.assets.textures;
     return Object.entries(t).map(([k, v]) => [k, v && v.image ? v.image.width : 0]);
@@ -86,12 +101,88 @@ try {
     JSON.stringify(rootMotion));
   rec('无未捕获异常', c.exceptions.length === 0, c.exceptions.slice(0, 2).join(' | '));
   rec('无 console.error', realErrors(c.consoleErrors).length === 0, realErrors(c.consoleErrors).slice(0, 2).join(' | '));
-  await c.shot('01-menu.png');
+  await c.shot('01-lobby.png');
+
+  section('A2. 3D 大厅漫游与设施交互');
+  await c.evaluate('document.getElementById("lobby-entry").click()');
+  await c.frame(2);
+  rec('点击入口遮罩后仍在大厅（进入漫游态）', String(await c.evaluate('window.__game.state')) === 'lobby');
+
+  // WASD 前进：真实键盘事件驱动漫游
+  const pos0 = await c.evaluate('({ x: window.__game.lobby.player.pos.x, z: window.__game.lobby.player.pos.z })');
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyW', key: 'w', windowsVirtualKeyCode: 87, nativeVirtualKeyCode: 87 });
+  await c.frame(20);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyW', key: 'w', windowsVirtualKeyCode: 87, nativeVirtualKeyCode: 87 });
+  await c.frame(2);
+  const pos1 = await c.evaluate('({ x: window.__game.lobby.player.pos.x, z: window.__game.lobby.player.pos.z })');
+  rec('WASD 可在 3D 大厅内移动', Math.hypot(pos1.x - pos0.x, pos1.z - pos0.z) > 0.25,
+    `${JSON.stringify(pos0)} → ${JSON.stringify(pos1)}`);
+
+  // 站到交易所柜台前，按 F 打开对应页签
+  await c.evaluate(`(() => {
+    const p = window.__game.lobby.player;
+    p.pos.set(-4.5, 0, -3.4); p.vel.set(0, 0, 0); p.yaw = Math.PI / 2; p.pitch = 0;
+  })()`);
+  await c.frame(2);
+  const near = await c.evaluate('window.__game.lobby.nearest && window.__game.lobby.nearest.def.id');
+  rec('走近物资交易所被识别为可交互设施', near === 'exchange', String(near));
+  rec('屏幕下方出现「按 F 打开」提示',
+    String(await txt(c, '!document.getElementById("lobby-interact").classList.contains("hidden") && document.getElementById("lobby-interact-name").textContent.includes("物资交易所")')) === 'true');
+
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'KeyF', key: 'f', windowsVirtualKeyCode: 70, nativeVirtualKeyCode: 70 });
+  await c.frame(3);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'KeyF', key: 'f', windowsVirtualKeyCode: 70, nativeVirtualKeyCode: 70 });
+  const panel = await c.evaluate(`(() => ({
+    state: window.__game.state,
+    menu: !document.getElementById('menu').classList.contains('hidden'),
+    tab: document.querySelector('.nav-item.active') ? document.querySelector('.nav-item.active').dataset.tab : '',
+    page: document.querySelector('#tab-exchange').classList.contains('active'),
+  }))()`);
+  rec('按 F 打开物资交易所面板', panel.state === 'lobby_panel' && panel.menu && panel.tab === 'exchange' && panel.page, JSON.stringify(panel));
+
+  // Esc 关闭面板 → 回到漫游
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await c.frame(3);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  const closed = await c.evaluate('({ state: window.__game.state, menu: document.getElementById("menu").classList.contains("hidden") })');
+  rec('Esc 关闭面板并回到 3D 漫游', closed.state === 'lobby' && closed.menu, JSON.stringify(closed));
+
+  // TAB 打开完整面板（默认停在作战页）
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Tab', key: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  await c.frame(3);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Tab', key: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  rec('TAB 打开完整大厅面板', String(await c.evaluate('window.__game.state')) === 'lobby_panel');
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await c.frame(2);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  rec('再按 Esc 回到大厅', String(await c.evaluate('window.__game.state')) === 'lobby');
+
+  // TAB 冲突：面板打开时（input 被禁用）按 TAB 也必须只关闭面板，不能把焦点交给浏览器
+  await c.evaluate('window.__game.openLobbyPanel("armory"); document.querySelector(".nav-item").focus();');
+  await c.frame(2);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Tab', key: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  await c.frame(2);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Tab', key: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  await c.frame(3);
+  const tabClose = await c.evaluate(`(() => ({
+    state: window.__game.state,
+    menuHidden: document.getElementById('menu').classList.contains('hidden'),
+    active: document.activeElement ? document.activeElement.tagName : '',
+  }))()`);
+  rec('面板内 TAB 只关闭面板，焦点不留在按钮 / 浏览器 UI',
+    tabClose.state === 'lobby' && tabClose.menuHidden && tabClose.active !== 'BUTTON', JSON.stringify(tabClose));
+
+  await c.shot('01b-lobby-walk.png');
 
   section('B. 开局与波次初始化');
+  // 大厅内打开指挥台面板，再从面板开始行动（与玩家真实操作路径一致）
+  await c.evaluate('window.__game.openLobbyPanel("battle")');
+  await c.frame(2);
+  rec('指挥台面板可打开并停在作战页', String(await c.evaluate('document.querySelector(".nav-item.active").dataset.tab')) === 'battle');
   await c.evaluate('document.getElementById("btn-start").click()');
   const playing = await c.waitFor('window.__game.state === "playing"', 10000);
-  rec('进入 playing', playing, String(await txt(c, 'window.__game.state')));
+  rec('从大厅面板开始行动，进入 playing', playing, String(await txt(c, 'window.__game.state')));
+  rec('大厅 HUD 在战斗中隐藏', String(await txt(c, 'document.getElementById("lobby-hud").classList.contains("hidden")')) === 'true');
   await c.frame(6);
   rec('HUD 可见', String(await txt(c, '!document.getElementById("hud").classList.contains("hidden")')) === 'true');
   rec('生命 100 / 护甲 50',
@@ -176,7 +267,9 @@ try {
   rec('开镜降低鼠标灵敏度', ads.sens < 0.8, `aimScale=${ads.sens.toFixed(2)}`);
   rec('开镜准星收束', ads.cross === true, `aimProgress=${ads.aim.toFixed(2)}`);
   await c.send('Input.dispatchMouseEvent', rightRelease);
-  await c.frame(24);
+  // 等插值完全回落（固定帧数在高负载下可能停在 6%）
+  await c.waitFor(`window.__game.gun.aimProgress < 0.02 && Math.abs(window.__game.camera.fov - ${fovBase}) < 0.5`, 6000);
+  await c.frame(3);
   const adsOff = await c.evaluate('({ fov: window.__game.camera.fov, sens: window.__game.mouseLook.aimScale, aim: window.__game.gun.aimProgress })');
   rec('松开右键恢复 FOV / 灵敏度',
     Math.abs(adsOff.fov - fovBase) < 0.6 && adsOff.sens > 0.98 && adsOff.aim < 0.05, JSON.stringify(adsOff));
@@ -185,7 +278,8 @@ try {
   await c.evaluate('window.__game.gun.switchCooldown = 0; window.__game.gun.switchWeapon("sniper")');
   await c.frame(2);
   await c.send('Input.dispatchMouseEvent', rightPress);
-  await c.frame(24);
+  await c.waitFor('window.__game.camera.fov < 32', 6000);
+  await c.frame(2);
   const scope = await c.evaluate(`({
     id: window.__game.gun.currentId,
     fov: window.__game.camera.fov,
@@ -574,12 +668,13 @@ try {
   rec('面板带 lose 样式', String(await txt(c, 'document.getElementById("result").classList.contains("lose")')) === 'true');
   await c.shot('04-result-lose.png');
 
-  section('J. 返回主菜单');
+  section('J. 返回大厅');
   await c.evaluate('document.getElementById("btn-menu").click()');
   await c.frame(3);
-  rec('回到主菜单', String(await c.evaluate('window.__game.state')) === 'menu', String(await c.evaluate('window.__game.state')));
-  rec('菜单可见 / HUD 隐藏',
-    String(await txt(c, '!document.getElementById("menu").classList.contains("hidden") && document.getElementById("hud").classList.contains("hidden")')) === 'true');
+  rec('结算后回到 3D 大厅', String(await c.evaluate('window.__game.state')) === 'lobby', String(await c.evaluate('window.__game.state')));
+  rec('大厅 HUD 可见 / 战斗 HUD 隐藏',
+    String(await txt(c, '!document.getElementById("lobby-hud").classList.contains("hidden") && document.getElementById("hud").classList.contains("hidden")')) === 'true');
+  rec('大厅玩家已回到出生点', String(await c.evaluate('Math.abs(window.__game.lobby.player.pos.z - window.__game.lobby.spawn.z) < 0.01')) === 'true');
 
   section('M. 任务奖励面板');
   const m0 = await c.evaluate(`(() => {
@@ -772,8 +867,8 @@ try {
 
   section('N. 守城模式：地图 / 核心 / 场景武器 / 商店');
   await c.send('Page.navigate', { url: `http://127.0.0.1:${port}/?mode=defense` });
-  const readyDef = await c.waitFor('window.__game && window.__game.state === "menu"', 60000);
-  rec('守城页面加载完成', readyDef);
+  const readyDef = await c.waitFor('window.__game && window.__game.state === "lobby"', 60000);
+  rec('守城页面加载完成（进入大厅）', readyDef);
   const defMeta = await c.evaluate(`(() => {
     const g = window.__game;
     return {
@@ -788,10 +883,15 @@ try {
   rec('切换至领地防线地图', defMeta.level === 'defense' && defMeta.hasDefense, defMeta.level);
   rec('守城运行时已创建 3 件场景武器（岸防炮 / 机枪 / 喷火器）', defMeta.weapons === 3, `weapons=${defMeta.weapons}`);
   rec('核心初始生命 1000', defMeta.core === 1000, `core=${defMeta.core}`);
-  rec('守城 HUD 默认显示，局内金币从 0 开始', defMeta.hud && defMeta.gold === 0);
+  rec('守城 HUD 在大厅中隐藏，局内金币 0', defMeta.hud === false && defMeta.gold === 0, `hud=${defMeta.hud} gold=${defMeta.gold}`);
 
+  await c.evaluate('window.__game.openLobbyPanel("battle")');
+  await c.frame(2);
   await c.evaluate('document.getElementById("btn-start").click()');
   await c.waitFor('window.__game.state === "playing"', 10000);
+  await c.frame(4);
+  rec('开始守城后 HUD 显示',
+    String(await txt(c, '!document.getElementById("defense-status").classList.contains("hidden")')) === 'true');
   await c.evaluate(`(() => {
     const g = window.__game;
     g.enemies.enemies.forEach((e) => { e.dead = true; e.deadTimer = 1; e.root.visible = false; });

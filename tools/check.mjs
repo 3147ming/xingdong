@@ -85,9 +85,9 @@ const SRC_MODULES = [
   'weapons/GunSystem.js', 'weapons/WeaponView.js', 'weapons/Effects.js', 'weapons/CasingSystem.js',
   'enemies/EnemyManager.js', 'enemies/EnemyAI.js',
   'world/OutdoorMap.js', 'world/MapBuilder.js', 'world/levels.js', 'world/SupplyManager.js',
-  'world/DefenseManager.js', 'world/LobbyStage.js',
+  'world/DefenseManager.js', 'world/LobbyScene.js',
   'ui/HUD.js', 'ui/Menu.js', 'ui/LobbyUI.js', 'ui/SettingsUI.js', 'ui/ArmoryUI.js', 'ui/MissionsUI.js',
-  'ui/DefenseUI.js', 'ui/GrowthUI.js',
+  'ui/DefenseUI.js', 'ui/GrowthUI.js', 'ui/ExchangeUI.js', 'ui/ResearchUI.js',
 ];
 for (const m of SRC_MODULES) {
   const full = `src/${m}`;

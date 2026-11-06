@@ -19,7 +19,7 @@ import { CollisionWorld } from './CollisionWorld.js';
 import { SaveManager } from './SaveManager.js';
 import { computeAccuracy, computeScore, pickGrade } from './scoring.js';
 import { OutdoorMap } from '../world/OutdoorMap.js';
-import { LobbyStage } from '../world/LobbyStage.js';
+import { LobbyScene } from '../world/LobbyScene.js';
 import { SupplyManager } from '../world/SupplyManager.js';
 import { DefenseManager } from '../world/DefenseManager.js';
 import { MouseLook } from '../player/MouseLook.js';
@@ -94,6 +94,7 @@ export class Game {
       onResume: () => this.resumeGame(),
       onRestart: () => this.restart(),
       onMenu: () => this.backToMenu(),
+      onCloseLobby: () => this.closeLobbyPanel(),
     });
 
     // 局外存档：大厅资源与战绩从这里读
@@ -285,9 +286,10 @@ export class Game {
     this.player.update(0.016, this.mouseLook);
     this.mouseLook.update(0.016);
 
-    // 相机点击：游戏中重新锁定鼠标
+    // 相机点击：游戏中 / 大厅重新锁定鼠标
     this.renderer.domElement.addEventListener('click', () => {
       if (this.state === 'playing' && !this.input.locked) this.input.requestLock();
+      else if (this.state === 'lobby' && !this.input.locked) this.input.requestLock();
     });
 
     window.addEventListener('resize', () => this._onResize());
@@ -305,11 +307,20 @@ export class Game {
       this._debugTimer = 0;
     }
 
-    // 大厅 3D 待机展示：独立场景里的程序化简模角色，仅菜单态渲染
-    this.lobbyStage = new LobbyStage();
+    // 大厅 3D：可第一人称漫游的基地空间（独立场景，仅大厅 / 面板态渲染）
+    this.lobby = new LobbyScene();
+    this.lobbyHud = document.getElementById('lobby-hud');
+    this.lobbyEntry = document.getElementById('lobby-entry');
+    this.lobbyInteract = document.getElementById('lobby-interact');
+    this.lobbyInteractName = document.getElementById('lobby-interact-name');
+    if (this.lobbyEntry) {
+      this.lobbyEntry.addEventListener('click', () => this._enterLobbyFromEntry());
+    }
+    // 注意：指针锁定失败（无手势 / 浏览器拒绝）时不再弹全屏遮罩，
+    // 只保留底部「点击画面继续」提示，避免已点过进场的玩家又被遮罩挡住。
 
-    this.menu.showStart();
-    this.state = 'menu';
+    // 首次进入大厅：需要一次点击手势才能锁定鼠标
+    this.enterLobby(true);
 
     // 启动循环
     this.clock.start();
@@ -359,7 +370,13 @@ export class Game {
     this.hud.reset(this.enemies.infinite ? null : this.enemies.waves.length);
     this.hud.setKills(0);
     this.menu.hideAll();
-    if (this.defenseUI) this.defenseUI.hideShop();
+    this.menu.hideLobbyPanel();
+    if (this.lobbyHud) this.lobbyHud.classList.add('hidden');
+    this._hideLobbyEntry();
+    if (this.defenseUI) {
+      this.defenseUI.setActive(!!this.defense);
+      this.defenseUI.hideShop();
+    }
     this.input.enabled = true;
     this.mouseLook.reset();
     this.input.consumeMouseDelta();
@@ -526,7 +543,10 @@ export class Game {
     this.enemies.startMatch();
     this.supplies.reset();
     if (this.defense) this.defense.resetRun();
-    if (this.defenseUI) this.defenseUI.hideShop();
+    if (this.defenseUI) {
+      this.defenseUI.setActive(!!this.defense);
+      this.defenseUI.hideShop();
+    }
     this.hud.setKills(0);
     this.hud.reset(this.enemies.infinite ? null : this.enemies.waves.length);
     this.hud.setVisible(true);
@@ -541,20 +561,123 @@ export class Game {
     this._updateMissionObjective();
   }
 
-  /** 结算面板"返回主菜单" */
+  /**
+   * 结算面板"返回主菜单" / 暂停面板"退出"：统一回到 3D 大厅
+   */
   backToMenu() {
     if (this.state === 'result') this.stats.endedAt = performance.now();
     else this._persistAmmoStock();
-    this.state = 'menu';
-    this.input.enabled = false;
+    this.enterLobby(false);
+  }
+
+  /**
+   * 进入 3D 大厅
+   * @param {boolean} firstEntry 首次加载完成：没有用户手势，需要点击遮罩才能锁定鼠标
+   */
+  enterLobby(firstEntry = false) {
+    this.state = 'lobby';
+    this.input.enabled = true;
     this.input.releaseLock();
     this._exitFullscreen();
     this.gun.setMouseDown(false);
+    this.gun.setAiming(false);
     this.hud.setVisible(false);
+    if (this.defenseUI) {
+      this.defenseUI.setActive(false);
+      this.defenseUI.hideShop();
+    }
     if (this.growthUI) this.growthUI.hide();
     this.mech?.reset();
+    if (this.lobby) this.lobby.resetPlayer();
     this._refreshLobby();
     this.menu.showStart();
+    this.menu.hideLobbyPanel();
+    if (this.lobbyHud) this.lobbyHud.classList.remove('hidden');
+    if (this.lobbyInteract) this.lobbyInteract.classList.add('hidden');
+    this._syncLobbyHud();
+    this._ignoreBlurUntil = performance.now() + 800;
+
+    if (firstEntry) {
+      this._showLobbyEntry();
+    } else {
+      this._hideLobbyEntry();
+      this.input.requestLock();
+    }
+  }
+
+  _showLobbyEntry() {
+    if (this.lobbyEntry) this.lobbyEntry.classList.remove('hidden');
+  }
+
+  _hideLobbyEntry() {
+    if (this.lobbyEntry) this.lobbyEntry.classList.add('hidden');
+  }
+
+  /** 点击「进入基地大厅」：手势内请求指针锁定 */
+  _enterLobbyFromEntry() {
+    if (this.state !== 'lobby') return;
+    this._hideLobbyEntry();
+    this.input.enabled = true;
+    this.input.requestLock();
+    this.audio?.resume();
+  }
+
+  /**
+   * 打开大厅面板（TAB = 上次页签；F = 设施对应页签）
+   * @param {string} tab
+   */
+  openLobbyPanel(tab) {
+    if (this.state !== 'lobby') return;
+    this.state = 'lobby_panel';
+    this._hideLobbyEntry();
+    this.input.releaseLock();
+    this.input.enabled = false;      // 面板用系统鼠标，停止采集视角位移
+    this.input.consumeMouseDelta();
+    this.menu.showLobbyPanel(tab || 'battle');
+    this._syncLobbyHud();
+    if (this.lobbyHud) this.lobbyHud.classList.add('hidden');
+    if (this.lobbyInteract) this.lobbyInteract.classList.add('hidden');
+  }
+
+  /** 关闭大厅面板，回到 3D 漫游 */
+  closeLobbyPanel() {
+    if (this.state !== 'lobby_panel') return;
+    this.state = 'lobby';
+    this.input.enabled = true;
+    this.menu.hideLobbyPanel();
+    this._blurUiFocus();
+    if (this.lobbyHud) this.lobbyHud.classList.remove('hidden');
+    this.input.requestLock();
+  }
+
+  /** 清掉面板按钮的焦点，避免按键继续落到隐藏的 UI 上 */
+  _blurUiFocus() {
+    const el = document.activeElement;
+    if (el && el !== document.body && el.blur) el.blur();
+  }
+
+  /** 把存档资源同步到 3D 大厅顶部资源条 */
+  _syncLobbyHud() {
+    if (!this.save) return;
+    const m = this.save.data.meta;
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = String(v);
+    };
+    set('lh-cores', m.cores || 0);
+    set('lh-coins', m.coins || 0);
+    set('lh-rep', m.reputation || 0);
+  }
+
+  /** 大厅设施交互提示（F 打开 xxx） */
+  _updateLobbyInteract(nearest) {
+    if (!this.lobbyInteract) return;
+    if (!nearest) {
+      this.lobbyInteract.classList.add('hidden');
+      return;
+    }
+    this.lobbyInteract.classList.remove('hidden');
+    if (this.lobbyInteractName) this.lobbyInteractName.textContent = `打开 ${nearest.def.name}`;
   }
 
   /** 把存档数据刷到大厅面板 */
@@ -573,6 +696,7 @@ export class Game {
       level: d.stats.bestLevel,
       wave: d.stats.bestWave,
     });
+    this._syncLobbyHud();
   }
 
   /** 应用设置（改键 / 灵敏度 / 音量 / 自动拾取），改动后立即生效 */
@@ -647,7 +771,7 @@ export class Game {
   _onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
-    if (this.lobbyStage) this.lobbyStage.resize();
+    if (this.lobby) this.lobby.resize();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   }
@@ -939,10 +1063,10 @@ export class Game {
       this._fpsAcc = 0;
     }
     this._update(dt);
-    // 菜单态展示大厅待机角色；其余状态渲染战斗场景
-    if (this.state === 'menu' && this.lobbyStage) {
-      this.lobbyStage.update(dt);
-      this.renderer.render(this.lobbyStage.scene, this.lobbyStage.camera);
+    // 大厅态渲染 3D 基地；面板态保留大厅作为背景；其余渲染战斗场景
+    if ((this.state === 'lobby' || this.state === 'lobby_panel') && this.lobby) {
+      if (this.state === 'lobby_panel') this.lobby.tick(dt);
+      this.lobby.render(this.renderer);
     } else {
       this.renderer.render(this.scene, this.camera);
     }
@@ -953,7 +1077,24 @@ export class Game {
     if (this.input.consumeAction('debugFps')) this._toggleFps();
 
     // 输入（键盘边沿事件在暂停/死亡时仍然有效）
-    if (this.state === 'playing') {
+    if (this.state === 'lobby') {
+      // 3D 大厅：自由漫游 + 设施交互
+      const nearest = this.lobby.update(dt, this.input);
+      this._updateLobbyInteract(nearest);
+      if (this.input.consumeAction('panel')) {
+        // TAB：打开完整面板（停在上次页签）
+        this.openLobbyPanel(this.menu.lobby.activeTab || 'battle');
+      } else if (this.input.consumeAction('pickup') && nearest) {
+        // F：打开脚下设施对应的页签
+        this.openLobbyPanel(nearest.def.tab);
+      }
+    } else if (this.state === 'lobby_panel') {
+      // 面板态：大厅只保留待机动画；TAB / Esc 关闭回漫游
+      this.lobby.tick(dt);
+      if (this.input.consumeAction('pause') || this.input.consumeAction('panel')) {
+        this.closeLobbyPanel();
+      }
+    } else if (this.state === 'playing') {
       const input = this.input;
       const defense = this.defense;
       const mounted = !!(defense && defense.isMounted);
