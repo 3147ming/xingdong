@@ -25,6 +25,10 @@ export class PlayerController {
     this.landShake = 0;     // 落地震屏强度
     this._wasAirborne = false;
     this._peakFallSpeed = 0;
+    // 翻越（vault）状态：翻越期间锁定控制并播放动画
+    this.vaulting = false;
+    this.vaultTimer = 0;
+    this.vaultDir = new THREE.Vector3();
     // 蹲伏 / 受击僵直 / 疾跑
     this.isCrouching = false;
     this.isSlow = false;
@@ -107,13 +111,26 @@ export class PlayerController {
         this.position, dx, dz, PLAYER.radius, this.currentHeight, PLAYER.vaultHeight
       );
       if (vaultTop != null) {
-        // 翻越：抬到顶面并给一点上抛，随后由重力自然落到平台上
+        // 翻越：进入 vault 状态，向前方冲一个短冲量，再抬上顶面，手感比纯传送更自然
+        this.vaulting = true;
+        this.vaultTimer = PLAYER.vaultTime;
+        this.vaultDir.set(dx, 0, dz);
         this.position.y = vaultTop + 0.001;
         this.velocity.y = PLAYER.vaultLift;
+        this.velocity.x += this.vaultDir.x * PLAYER.vaultPush;
+        this.velocity.z += this.vaultDir.z * PLAYER.vaultPush;
       } else {
         this.velocity.y = PLAYER.jumpSpeed;
       }
       this.grounded = false;
+    }
+
+    // 翻越期间锁定控制，逐步衰减水平冲量并恢复普通空中状态
+    if (this.vaulting) {
+      this.vaultTimer -= dt;
+      this.velocity.x *= Math.max(0, 1 - dt * 6);
+      this.velocity.z *= Math.max(0, 1 - dt * 6);
+      if (this.vaultTimer <= 0) this.vaulting = false;
     }
 
     // 重力

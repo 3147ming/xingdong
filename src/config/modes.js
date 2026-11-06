@@ -11,15 +11,15 @@
 export const CAMPAIGN_WAVES = [
   // total：本波总数；alive：同时存活上限；mix：变体配额
   {
-    total: 6, alive: 4, mix: { walker: 5, swift: 1 },
+    total: 14, alive: 8, mix: { walker: 9, swift: 3, spitter: 2 },
     healthMul: 1.00, damageMul: 1.00, accuracyMul: 0.85, speedMul: 1.00,
   },
   {
-    total: 8, alive: 5, mix: { walker: 4, spitter: 2, swift: 1, bomber: 1 },
+    total: 18, alive: 10, mix: { walker: 9, spitter: 3, swift: 3, bomber: 1, brute: 2 },
     healthMul: 1.10, damageMul: 1.05, accuracyMul: 1.00, speedMul: 1.05,
   },
   {
-    total: 10, alive: 6, mix: { walker: 3, spitter: 2, brute: 1, swift: 2, bomber: 1, howler: 1 },
+    total: 24, alive: 12, mix: { walker: 10, spitter: 3, brute: 3, swift: 4, bomber: 2, howler: 2 },
     healthMul: 1.22, damageMul: 1.15, accuracyMul: 1.10, speedMul: 1.08,
   },
 ];

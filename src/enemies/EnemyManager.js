@@ -351,6 +351,14 @@ export class EnemyManager {
     return this.waveState === STATE.DONE;
   }
 
+  /** 枪声/子弹落地：通知所有丧尸朝声源移动 */
+  hearAt(pos) {
+    if (!pos) return;
+    for (const e of this.enemies) {
+      if (!e.dead && e.root && e.root.visible) e.hearAt(pos);
+    }
+  }
+
   /** 玩家射击的命中检测（返回最近敌人） */
   raycast(origin, dir, maxDist) {
     let best = null;

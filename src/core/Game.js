@@ -48,6 +48,7 @@ export class Game {
     this.clock = new THREE.Clock();
     this.accentColor = 0xffb020;
     this._ammoWheelOpen = false;
+    this.aiming = false;        // 右键开镜切换状态（toggle，非长按）
     this.stats = this._emptyStats();
   }
 
@@ -516,6 +517,7 @@ export class Game {
     this.input.enabled = false;
     this.gun.setMouseDown(false);
     this.gun.setAiming(false);
+    this.aiming = false;
     this.menu.showPause();
   }
 
@@ -1101,7 +1103,9 @@ export class Game {
       const carrying = !!(defense && defense.isCarrying);
 
       // 鼠标视角（弹种轮盘打开时，鼠标位移用于选弹而不是转视角）
-      const aiming = !mounted && !carrying && input.actionDown('aim');
+      // 右键开镜切换（toggle）：按一下开、再按一下关
+      if (input.consumeAction('aim')) this.aiming = !this.aiming;
+      const aiming = !mounted && !carrying && this.aiming;
       this.gun.setAiming(aiming);
 
       let delta = input.consumeMouseDelta();

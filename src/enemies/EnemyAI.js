@@ -61,6 +61,8 @@ export class EnemyAI {
     this.chaseLinger = 0;       // 发现玩家后的追击延迟（>0 时仍停留在 alert）
     this._animSwitchTimer = 0;  // 动画切换冷却，避免 run/attack 频繁抖动
     this.roarCooldown = 0;      // howler 嘶吼冷却
+    this._hearTimer = 0;        // 听到枪声/子弹落地后的警觉倒计时
+    this._hearPos = null;       // 声源位置，听到后朝此处移动
 
     // 波次倍率（EnemyManager.configure 注入）
     this.healthMul = 1;
@@ -243,6 +245,33 @@ export class EnemyAI {
     return this.collision.lineOfSight(eye, target);
   }
 
+  /** 听到枪声/子弹落地：敌人会朝声源移动，避免"丧尸对着空地发呆" */
+  hearAt(pos) {
+    if (!pos) return;
+    this._hearTimer = ENEMY.hearTime || 4.0;
+    this._hearPos = pos.clone();
+    this.lastKnown.copy(pos);
+    // 只要不在死状态，听到动静就立刻进入警觉/追击
+    if (this.state !== 'dead') {
+      if (this.state === 'patrol' || this.state === 'alert') {
+        this.state = 'chase';
+        this.alertTimer = ENEMY.alertTime;
+      }
+    }
+  }
+
+  /** 增加视野：向四周补充 180° 近距离感知（防止背后被发现也没反应） */
+  _canSeePlayerWide() {
+    if (!this.player || this.player.dead) return false;
+    const eye = this.position.clone();
+    eye.y += 1.55;
+    const target = this.player.camera.position.clone();
+    const dist = eye.distanceTo(target);
+    if (dist > ENEMY.sightCloseRange) return false;
+    // 近距离不限制朝向，只要有视线就发现
+    return this.collision.lineOfSight(eye, target);
+  }
+
   _pickPatrolPoint() {
     const pts = this.patrolPoints;
     let p;
@@ -297,13 +326,28 @@ export class EnemyAI {
     if (this.attackTimer > 0) this.attackTimer -= dt;
     if (this.flinchTimer > 0) this.flinchTimer -= dt;
 
+    // 感知：视野 + 听觉
     const sees = this._canSeePlayer();
+
+    // 听觉警觉倒计时：听到枪声后朝声源移动，时间结束则恢复巡逻
+    if (this._hearTimer > 0) {
+      this._hearTimer -= dt;
+      if (this._hearTimer <= 0) {
+        this._hearPos = null;
+        if (this.state === 'chase' && !sees) {
+          this.state = 'alert';
+          this.alertTimer = ENEMY.alertTime;
+          this.baseScanHeading = this.heading;
+          this.scanTime = 0;
+        }
+      }
+    }
+
     const distToPlayer = this.player
       ? Math.hypot(this.player.position.x - this.position.x, this.player.position.z - this.position.z)
       : Infinity;
 
-    // 追击延迟：刚看到玩家先愣一下再冲，避免"影子瞬间扑脸"
-    if (this.chaseLinger > 0) this.chaseLinger -= dt;
+    // 追击延迟已移除：丧尸发现玩家立即追击，不再愣在原地
     if (this.roarCooldown > 0) this.roarCooldown -= dt;
 
     // howler 嘶吼：发现玩家时触发一次范围内敌人警觉
@@ -312,32 +356,15 @@ export class EnemyAI {
       this.roarCooldown = 8.0;
     }
 
-    // 状态切换
-    if (sees) {
+    // 近距离全方位感知（防止背后被发现也没反应）
+    const seesClose = this._canSeePlayerWide();
+
+    // 状态切换：发现玩家立即进入追击/攻击，不再先 alert 停顿
+    if (sees || seesClose) {
       this.lastKnown.copy(this.player.position);
       this.alertTimer = ENEMY.alertTime;
       this.loseSightTimer = 0;
-      // 巡逻中第一次发现玩家 → 先愣一下再冲（追击延迟）
-      if (this.state === 'patrol') {
-        this.state = 'alert';
-        this.baseScanHeading = this.heading;
-        this.scanTime = 0;
-        this.chaseLinger = ENEMY.sightLinger || 0.3;
-      } else if (this.state === 'alert') {
-        // 还在 alert 扫视 → 等 chaseLinger 结束再切 chase/attack
-        if (this.chaseLinger > 0) {
-          if (this.state !== 'alert') {
-            this.state = 'alert';
-            this.baseScanHeading = this.heading;
-            this.scanTime = 0;
-          }
-        } else {
-          this.state = distToPlayer <= this.variant.attackRange ? 'attack' : 'chase';
-        }
-      } else {
-        // 已经在 chase/attack 中 → 维持当前状态（距离变化时 attack↔chase 自动切换）
-        this.state = distToPlayer <= this.variant.attackRange ? 'attack' : 'chase';
-      }
+      this.state = distToPlayer <= this.variant.attackRange ? 'attack' : 'chase';
     } else if (this.state === 'attack' || this.state === 'chase' || this.state === 'alert') {
       if (this.state !== 'alert') {
         this.state = 'alert';
@@ -412,11 +439,20 @@ export class EnemyAI {
 
   _updateChase(dt, dist) {
     if (!this.player) return;
-    const dx = this.player.position.x - this.position.x;
-    const dz = this.player.position.z - this.position.z;
+    // 听到枪声但未见玩家：朝声源移动；看到玩家后再朝玩家逼近
+    let dx = this.player.position.x - this.position.x;
+    let dz = this.player.position.z - this.position.z;
+    let targetDist = dist;
+    if (this._hearPos && !this._canSeePlayer() && !this._canSeePlayerWide()) {
+      const hx = this._hearPos.x - this.position.x;
+      const hz = this._hearPos.z - this.position.z;
+      dx = hx;
+      dz = hz;
+      targetDist = Math.hypot(hx, hz);
+    }
     // 丧尸永远朝玩家逼近（近战）；吐酸丧尸逼近到舒适距离即停
     const keep = this.melee ? this.variant.keepDistance : this.variant.keepDistance;
-    if (dist > keep) {
+    if (targetDist > keep) {
       this._moveToward(dx, dz, this.variant.chaseSpeed, dt);
     } else {
       this.velocity.x *= 0.8;

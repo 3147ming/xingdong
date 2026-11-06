@@ -108,11 +108,6 @@ export class WeaponView {
       o.receiveShadow = false;
       o.frustumCulled = false;
 
-      // 手臂网格为静态绑定姿势，未播放动画时会与枪身错位并大面积遮挡视野，默认隐藏
-      if (isArm) {
-        o.visible = false;
-      }
-
       // 记录弹匣节点，换弹时做位移动画
       if (o.name.toLowerCase().includes('mag')) {
         this.magazine = o;

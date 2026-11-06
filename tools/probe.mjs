@@ -192,7 +192,7 @@ try {
   rec('波次指示 1/3', String(await txt(c, 'document.getElementById("wave-now").textContent + "/" + document.getElementById("wave-total").textContent')) === '1/3');
   await c.waitFor('window.__game.enemies.waveSpawned > 0', 8000);
   const w0 = await c.evaluate('({ total: window.__game.enemies.waveTotal, alive: window.__game.enemies.aliveCount, spawned: window.__game.enemies.waveSpawned })');
-  rec('第 1 波共 6 只丧尸', w0.total === 6, JSON.stringify(w0));
+  rec('第 1 波共 14 只丧尸（平衡调整后总数）', w0.total === 14, JSON.stringify(w0));
   rec('场上存活不超过并发上限（4）', w0.alive <= 4, `alive=${w0.alive}`);
   const box = await c.evaluate(`(() => {
     const el = document.querySelector('#app canvas');
@@ -247,9 +247,9 @@ try {
   const rightPress = { type: 'mousePressed', x: 512, y: 288, button: 'right', buttons: 2, clickCount: 1 };
   const rightRelease = { type: 'mouseReleased', x: 512, y: 288, button: 'right', buttons: 0, clickCount: 1 };
 
-  // 右键开镜：真实鼠标事件驱动（不是直接改标志位）
+  // 右键开镜：真实鼠标事件驱动（toggle：按一次开，再按一次关）
   await c.send('Input.dispatchMouseEvent', rightPress);
-  // 等开镜插值（aimProgress）收敛，再读 FOV；固定帧数在无头下容易停在 94%
+  // 等开镜插值（aimProgress）收敛，再读 FOV
   await c.waitFor('window.__game.gun.aimProgress > 0.99', 4000);
   await c.frame(3);
   const ads = await c.evaluate(`(() => {
@@ -260,18 +260,20 @@ try {
       aim: g.gun.aimProgress,
       sens: g.mouseLook.aimScale,
       cross: document.getElementById('crosshair').classList.contains('aiming'),
+      aiming: g.aiming,
     };
   })()`);
-  rec('右键开镜：FOV 收束到瞄具值', Math.abs(ads.fov - ads.target) < 1 && ads.fov < fovBase,
+  rec('右键开镜（toggle）：FOV 收束到瞄具值', Math.abs(ads.fov - ads.target) < 1.5 && ads.fov < fovBase,
     `fov ${fovBase} → ${ads.fov.toFixed(1)}（目标 ${ads.target}）`);
   rec('开镜降低鼠标灵敏度', ads.sens < 0.8, `aimScale=${ads.sens.toFixed(2)}`);
   rec('开镜准星收束', ads.cross === true, `aimProgress=${ads.aim.toFixed(2)}`);
-  await c.send('Input.dispatchMouseEvent', rightRelease);
-  // 等插值完全回落（固定帧数在高负载下可能停在 6%）
+
+  // 再按一次右键关镜（toggle）
+  await c.send('Input.dispatchMouseEvent', rightPress);
   await c.waitFor(`window.__game.gun.aimProgress < 0.02 && Math.abs(window.__game.camera.fov - ${fovBase}) < 0.5`, 6000);
   await c.frame(3);
   const adsOff = await c.evaluate('({ fov: window.__game.camera.fov, sens: window.__game.mouseLook.aimScale, aim: window.__game.gun.aimProgress })');
-  rec('松开右键恢复 FOV / 灵敏度',
+  rec('右键再按关镜（toggle）：恢复 FOV / 灵敏度',
     Math.abs(adsOff.fov - fovBase) < 0.6 && adsOff.sens > 0.98 && adsOff.aim < 0.05, JSON.stringify(adsOff));
 
   // 重狙：开镜显示全屏瞄镜遮罩
@@ -287,9 +289,11 @@ try {
   })`);
   rec('重狙开镜（FOV<32 + 全屏瞄镜）', scope.id === 'sniper' && scope.fov < 32 && scope.overlay === true, JSON.stringify(scope));
   await c.shot('06-scope.png');
-  await c.send('Input.dispatchMouseEvent', rightRelease);
-  await c.frame(12);
-  rec('松开右键后瞄镜遮罩隐藏',
+  // toggle 模式：需再按一次右键关镜，遮罩才会隐藏（松开右键不关镜）
+  await c.send('Input.dispatchMouseEvent', rightPress);
+  await c.waitFor('window.__game.gun.aimProgress < 0.02', 6000);
+  await c.frame(3);
+  rec('再按右键关镜后瞄镜遮罩隐藏',
     String(await c.evaluate('document.getElementById("scope-overlay").classList.contains("hidden")')) === 'true');
   await c.evaluate('window.__game.gun.switchCooldown = 0; window.__game.gun.switchWeapon("rifle")');
   await c.frame(4);
@@ -642,7 +646,7 @@ try {
     wave: document.getElementById('rs-wave').textContent,
     time: document.getElementById('rs-time').textContent,
   })`);
-  rec('结算击杀 = 24（三波总数）', rs.kills === '24', JSON.stringify(rs));
+  rec('结算击杀 = 56（三波总数）', rs.kills === '56', JSON.stringify(rs));
   rec('结算波次 = 3/3', rs.wave === '3/3', rs.wave);
   rec('命中率为百分比格式', /^\d+%$/.test(rs.acc), rs.acc);
   const resultRewards = String(await txt(c, 'document.getElementById("result-rewards").textContent'));

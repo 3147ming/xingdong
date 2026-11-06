@@ -429,6 +429,14 @@ export class GunSystem {
 
     this._syncHud();
     this.onShot({ hit: anyHit, kill: anyKill, headshot: anyHeadshot });
+
+    // 子弹落地/枪声：通知附近丧尸朝声源移动（改进寻敌机制，丧尸不会只对着空地发呆）
+    if (this.enemies && this.enemies.hearAt) {
+      const origin = this.camera.position.clone();
+      const camDir = this.camera.getWorldDirection(this._tmpDir).clone();
+      const shotPos = origin.clone().addScaledVector(camDir, 12);
+      this.enemies.hearAt(shotPos);
+    }
   }
 
   /** 击杀结算（普通命中 / 连锁 / 爆炸共用） */

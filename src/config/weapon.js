@@ -28,6 +28,8 @@ export const PLAYER = {
   jumpSpeed: 5.8,
   vaultHeight: 2.65,      // 自动翻越的最大高度差（箱体 / 集装箱 / 矮墙）
   vaultLift: 1.8,         // 翻越时的上抛速度
+  vaultTime: 0.35,        // 翻越持续时间（期间锁定控制并播放动画）
+  vaultPush: 2.6,         // 翻越向前的短冲量，让手感比纯传送更自然
   gravity: -19.0,
   accel: 14.0,            // 地面加速度（越大越跟手）
   airAccel: 3.0,
@@ -200,10 +202,12 @@ export const WEAPON_UNLOCKED = ['rifle', 'pistol', 'shotgun', 'sniper'];
 // 铁律：普通丧尸（walker / brute）只有近战，**没有任何枪械参数**。
 //      远程威胁只来自「吐酸丧尸」的喷吐（非枪械），单独走 spit 通道。
 export const ENEMY = {
-  sightRange: 30,         // 视野距离
-  sightAngle: Math.cos(Math.PI / 4.3), // 约 ±42°（收窄视野，背后更难被偷袭）
-  sightLinger: 0.35,      // 发现玩家后的追击延迟（先愣一下再冲）
-  alertTime: 5.0,         // 失去视野后的警戒搜索时间
+  sightRange: 45,         // 视野距离（从 30 提高，丧尸更远就能发现玩家）
+  sightCloseRange: 14,    // 近距离全方位感知半径（背后/侧面 14m 以内均会发现）
+  sightAngle: Math.cos(Math.PI / 4.3), // 约 ±42°（远距离视野锥，近距离不限制朝向）
+  sightLinger: 0.0,       // 发现玩家后的追击延迟：已移除，立即追击
+  alertTime: 6.0,         // 失去视野/听到动静后的警戒搜索时间
+  hearTime: 4.0,          // 听到枪声/子弹落地后的警觉持续时间
   flinchTime: 0.22,       // 受击抖动时间
   deathBodyTime: 5.0,     // 尸体停留时间
   spawnFadeTime: 0.4,     // 重生淡出时长
@@ -222,8 +226,8 @@ export const ENEMY = {
       id: 'walker',
       name: '普通丧尸',
       maxHealth: 90,
-      patrolSpeed: 1.2,
-      chaseSpeed: 2.2,      // v0.5 下调：比玩家步行慢，给玩家走位/换弹窗口
+      patrolSpeed: 1.5,
+      chaseSpeed: 3.0,      // 提高：追击速度接近玩家步行，压力更大
       damage: 11,           // 爪击/撕咬
       attackRange: 2.15,    // 近战触及距离
       attackInterval: 1.25, // 两次攻击间隔
@@ -238,8 +242,8 @@ export const ENEMY = {
       id: 'spitter',
       name: '吐酸丧尸',
       maxHealth: 70,
-      patrolSpeed: 1.05,
-      chaseSpeed: 2.0,
+      patrolSpeed: 1.3,
+      chaseSpeed: 2.4,
       damage: 8,
       attackRange: 17,
       attackInterval: 2.1,
@@ -256,8 +260,8 @@ export const ENEMY = {
       id: 'brute',
       name: '重锤丧尸',
       maxHealth: 220,
-      patrolSpeed: 0.95,
-      chaseSpeed: 1.85,
+      patrolSpeed: 1.2,
+      chaseSpeed: 2.2,
       damage: 22,
       attackRange: 2.6,
       attackInterval: 1.75,
@@ -272,8 +276,8 @@ export const ENEMY = {
       id: 'swift',
       name: '迅捷丧尸',
       maxHealth: 48,
-      patrolSpeed: 1.9,
-      chaseSpeed: 3.8,
+      patrolSpeed: 2.2,
+      chaseSpeed: 4.4,
       damage: 8,
       attackRange: 1.9,
       attackInterval: 0.9,

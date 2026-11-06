@@ -12,8 +12,8 @@ const LEVEL_1_YARD = {
   id: 'yard',
   name: '露天货场',
 
-  halfX: 28,
-  halfZ: 22,
+  halfX: 55,
+  halfZ: 45,
   fenceHeight: 1.55,
   wallHeight: 7.2,
 
@@ -29,13 +29,21 @@ const LEVEL_1_YARD = {
   silhouetteColor: 0x8fa2b4,
 
   // 主路：从南门直达北侧的主干道（出生点就在路上）
-  mainRoad: { x: 8, z: 0, w: 5.6, d: 44 },
+  mainRoad: { x: 8, z: 0, w: 5.6, d: 88 },
 
   perimeterSegs: [
-    [-14, -21.6, 10, 1.15], [12, -21.6, 8, 1.15],
-    [-10, 21.6, 12, 1.15], [14, 21.6, 9, 1.15],
-    [-27.6, -6, 1.15, 10], [-27.6, 10, 1.15, 8],
-    [27.6, -8, 1.15, 9], [27.6, 8, 1.15, 11],
+    [-30, -44.6, 22, 1.15], [30, -44.6, 22, 1.15],
+    [-22, 44.6, 24, 1.15], [28, 44.6, 20, 1.15],
+    [-54.6, -12, 1.15, 20], [-54.6, 12, 1.15, 16],
+    [54.6, -16, 1.15, 18], [54.6, 16, 1.15, 22],
+  ],
+
+  // 建筑 / 据点（供攀爬、掩护、占点）
+  buildings: [
+    { x: 18, z: -16, w: 10, d: 8, h: 5, floors: 2, entry: true, balcony: true },
+    { x: -18, z: 14, w: 12, d: 9, h: 5, floors: 2, entry: true, balcony: false },
+    { x: -30, z: -28, w: 9, d: 7, h: 4.5, floors: 1, entry: true },
+    { x: 32, z: 26, w: 11, d: 8, h: 5, floors: 2, entry: true, balcony: true },
   ],
 
   crates: [

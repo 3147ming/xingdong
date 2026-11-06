@@ -225,6 +225,7 @@ export class MapBuilder {
     this._buildMainRoad();
     this._buildCeiling();
     this._buildPerimeter();
+    this._buildBuildings();          // 建筑 / 据点（新增）
     this._buildCrates();
     this._buildShelves();
     this._buildContainers();
@@ -748,5 +749,92 @@ export class MapBuilder {
     this.scene.remove(this.group);
     for (const obj of this.sceneObjects) this.scene.remove(obj);
     this.sceneObjects.length = 0;
+  }
+
+  // ---------------- 建筑 / 据点：带门洞的矩形建筑 + 屋顶 + 二层阳台 ----------------
+  _buildBuildings() {
+    const buildings = this.layout.buildings || [];
+    if (buildings.length === 0) return;
+    const matWall = this.matConcrete;
+    const matRoof = new THREE.MeshStandardMaterial({ color: 0x4a4f54, roughness: 0.85, metalness: 0.1 });
+    const matDoor = new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.7, metalness: 0.1 });
+
+    for (const b of buildings) {
+      const { x, z, w, d, h, floors = 1, entry = true, balcony = false } = b;
+      const yStep = h / floors;
+      const doorW = 1.2, doorH = 2.0;
+
+      // 每层墙（四面）+ 楼板
+      for (let f = 0; f < floors; f++) {
+        const fy = f * yStep;
+        const fw = w - 0.04;
+        const fh = yStep - 0.04;
+
+        // 前/后墙
+        const front = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.2), matWall);
+        front.position.set(x, fy + fh / 2, z - d / 2);
+        front.castShadow = true; front.receiveShadow = true;
+        this.group.add(front);
+        this.collision.addBox(x, fy + fh / 2, z - d / 2, fw, fh, 0.22, 'wall');
+
+        const back = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.2), matWall);
+        back.position.set(x, fy + fh / 2, z + d / 2);
+        back.castShadow = true; back.receiveShadow = true;
+        this.group.add(back);
+        this.collision.addBox(x, fy + fh / 2, z + d / 2, fw, fh, 0.22, 'wall');
+
+        // 左/右墙
+        const left = new THREE.Mesh(new THREE.BoxGeometry(0.2, fh, d), matWall);
+        left.position.set(x - w / 2, fy + fh / 2, z);
+        left.castShadow = true; left.receiveShadow = true;
+        this.group.add(left);
+        this.collision.addBox(x - w / 2, fy + fh / 2, z, 0.22, fh, d, 'wall');
+
+        const right = new THREE.Mesh(new THREE.BoxGeometry(0.2, fh, d), matWall);
+        right.position.set(x + w / 2, fy + fh / 2, z);
+        right.castShadow = true; right.receiveShadow = true;
+        this.group.add(right);
+        this.collision.addBox(x + w / 2, fy + fh / 2, z, 0.22, fh, d, 'wall');
+
+        // 一层正面开门洞：门体本身可碰撞，玩家可开门通过（此处简化为无碰撞门洞位置）
+        if (f === 0 && entry) {
+          const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.22), matDoor);
+          door.position.set(x, fy + 1.0, z - d / 2 - 0.12);
+          door.castShadow = true; door.receiveShadow = true;
+          this.group.add(door);
+        }
+
+        // 楼板（除顶层外）
+        if (f < floors - 1) {
+          const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, d - 0.1), matWall);
+          floorMesh.rotation.x = -Math.PI / 2;
+          floorMesh.position.set(x, fy + yStep, z);
+          floorMesh.receiveShadow = true;
+          this.group.add(floorMesh);
+        }
+      }
+
+      // 屋顶
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 1.05, 0.5, d * 1.05), matRoof);
+      roof.position.set(x, h + 0.25, z);
+      roof.castShadow = true; roof.receiveShadow = true;
+      this.group.add(roof);
+      this.collision.addBox(x, h + 0.25, z, w * 1.05, 0.5, d * 1.05, 'wall');
+
+      // 二层阳台（供攀爬/据点）
+      if (balcony && floors >= 2) {
+        const balW = w * 0.9;
+        const balconyFloor = new THREE.Mesh(new THREE.PlaneGeometry(balW, 1.0), matWall);
+        balconyFloor.rotation.x = -Math.PI / 2;
+        balconyFloor.position.set(x, h - yStep * 0.5, z - d / 2 - 0.55);
+        balconyFloor.receiveShadow = true;
+        this.group.add(balconyFloor);
+        const balconyWall = new THREE.Mesh(new THREE.BoxGeometry(balW, 1.1, 0.15), matWall);
+        balconyWall.position.set(x, h - yStep * 0.5 + 0.55, z - d / 2 - 1.05);
+        balconyWall.castShadow = true; balconyWall.receiveShadow = true;
+        this.group.add(balconyWall);
+        this.collision.addBox(x, h - yStep * 0.5 + 0.55, z - d / 2 - 1.05, balW, 1.1, 0.17, 'wall');
+      }
+    }
   }
 }
