@@ -267,12 +267,12 @@ export class SaveManager {
     return { level: p.level, points: gained, xp: p.xp };
   }
 
-  /** 分配一点属性；点数不足 / 已满时返回 false */
+  /** 分配一点属性；点数不足时返回 false（无上限，可无限加点） */
   allocateAttr(stat) {
     const def = ATTRIBUTES[stat];
     const p = this.data.progress;
     const cur = this.data.permanent[stat] || 0;
-    if (!def || p.points <= 0 || cur >= def.max) return false;
+    if (!def || p.points <= 0) return false;
     this.data.permanent[stat] = cur + 1;
     p.points -= 1;
     this.save();
@@ -524,7 +524,7 @@ export class SaveManager {
     return this.data.research[id] > 0 || this.hasFeature('research_' + id) || this.meets(def.unlock);
   }
 
-  /** 升级一条研究线；返回 {ok, message} */
+  /** 升级一条研究线；返回 {ok, message}（无上限，超出 5 级后成本持续递增） */
   upgradeResearch(id) {
     const def = RESEARCH[id];
     if (!def) return { ok: false, message: '未知研究线' };
@@ -533,12 +533,25 @@ export class SaveManager {
     }
     this.grantFeature('researchLab');
     const cur = this.researchLevel(id);
-    if (cur >= def.levels.length) return { ok: false, message: '该研究线已满级' };
     const firstLine = cur === 0 && !this.hasFeature('research_' + id);
     if (firstLine && !this.meets(def.unlock)) {
       return { ok: false, message: `研究线解锁需要 ${this.requirementText(def.unlock)}` };
     }
-    const cost = def.levels[cur];
+    let cost;
+    if (cur < def.levels.length) {
+      cost = def.levels[cur];
+    } else {
+      // 超过配置的 5 级：按第 5 级成本递推，每级额外 +step
+      const last = def.levels[def.levels.length - 1];
+      const over = cur - def.levels.length + 1;
+      const step = def.step || { coins: 400, material: 3, bossCore: 1 };
+      cost = {
+        coins: last.coins + step.coins * over,
+        material: last.material + step.material * over,
+        ...(last.bossCore ? { bossCore: last.bossCore + (step.bossCore || 1) * over } : null),
+        ...(last.map ? { map: last.map } : null),
+      };
+    }
     const mat = def.material;
     const needMat = cost.material || 0;
     const repCost = firstLine ? (def.unlock.reputation || 0) : 0;

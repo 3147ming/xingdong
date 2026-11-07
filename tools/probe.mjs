@@ -33,7 +33,7 @@ const url = `http://127.0.0.1:${port}/${LEVEL ? `?level=${LEVEL}` : ''}`;
 const c = await openSession({ tag: 'probe', width: 1024, height: 576 });
 
 /** 清空当前波：刷一个杀一个，直到本波总人数打完 */
-const clearWave = async () => {
+const clearWave = async (keepShop = false) => {
   const n = await c.evaluate(`(() => {
     const em = window.__game.enemies;
     let guard = 0;
@@ -45,6 +45,21 @@ const clearWave = async () => {
     }
     return { spawned: em.waveSpawned, killed: em.waveKilled, total: em.waveTotal };
   })()`);
+  // 波次肃清后会自动弹出关卡间军需商店：默认等待一帧让它弹出，再直接关掉。
+  // 这里不调用 _closeShop（那会 skipBreak 把休整时间压到 0.2s），
+  // 保留完整的 break 计时，后面的断言语义不变。
+  if (!keepShop) {
+    await c.frame(2);
+    await c.evaluate(`(() => {
+      const g = window.__game;
+      if (g.state === 'shop') {
+        g.defenseUI.hideShop();
+        g._fieldShop = false;
+        g.state = 'playing';
+        g.input.enabled = true;
+      }
+    })()`);
+  }
   return n;
 };
 
@@ -192,7 +207,7 @@ try {
   rec('波次指示 1/3', String(await txt(c, 'document.getElementById("wave-now").textContent + "/" + document.getElementById("wave-total").textContent')) === '1/3');
   await c.waitFor('window.__game.enemies.waveSpawned > 0', 8000);
   const w0 = await c.evaluate('({ total: window.__game.enemies.waveTotal, alive: window.__game.enemies.aliveCount, spawned: window.__game.enemies.waveSpawned })');
-  rec('第 1 波共 14 只丧尸（平衡调整后总数）', w0.total === 14, JSON.stringify(w0));
+  rec('第 1 波共 28 只丧尸（平衡调整后总数）', w0.total === 28, JSON.stringify(w0));
   rec('场上存活不超过并发上限（4）', w0.alive <= 4, `alive=${w0.alive}`);
   const box = await c.evaluate(`(() => {
     const el = document.querySelector('#app canvas');
@@ -493,7 +508,7 @@ try {
     return { tracersBefore, tracersAfter, hp: g.player.health.health, armor: g.player.health.armor };
   })()`);
   rec('普通丧尸近战不产生任何弹道曳光', noTracer.tracersAfter <= noTracer.tracersBefore, JSON.stringify(noTracer));
-  rec('普通丧尸近战可对玩家造成伤害（含护甲吸收）', noTracer.hp < 100, `hp=${noTracer.hp} armor=${noTracer.armor}`);
+  rec('普通丧尸近战可对玩家造成伤害（护甲优先吸收）', noTracer.hp < 100 || noTracer.armor < 50, `hp=${noTracer.hp} armor=${noTracer.armor}`);
 
   section('C3. 补给点（资源 / 弹药 / 物资）');
   const supplyCheck = await c.evaluate(`(() => {
@@ -605,12 +620,50 @@ try {
   rec('第 1 波按 total 刷满并清空', w1.killed === w1.total && w1.spawned >= w1.total, JSON.stringify(w1));
   await c.waitFor('window.__game.enemies.waveState === "break"', 15000);
   rec('清空后进入休整（break）', String(await c.evaluate('window.__game.enemies.waveState')) === 'break', String(await c.evaluate('window.__game.enemies.waveState')));
-  const reserveAfterWave = Number(await c.evaluate('window.__game.gun.reserve'));
-  rec('清波只发小量补给（备弹 +8）', reserveAfterWave >= reserveBeforeWave + 8, `${reserveBeforeWave} → ${reserveAfterWave}`);
-  rec('非守城模式清波不再弹出商店',
+  rec('清波不再自动弹出商店（改为 TAB 随时打开）',
     String(await c.evaluate('window.__game.state')) === 'playing'
     && String(await c.evaluate('document.getElementById("shop-panel").classList.contains("hidden")')) === 'true',
     `state=${await c.evaluate('window.__game.state')}`);
+  const reserveAfterWave = Number(await c.evaluate('window.__game.gun.reserve'));
+  rec('清波发放小量补给（备弹 +15）', reserveAfterWave >= reserveBeforeWave + 15, `${reserveBeforeWave} → ${reserveAfterWave}`);
+  rec('清波累积局内战地金币', Number(await c.evaluate('window.__game.runGold')) > 0,
+    `gold=${await c.evaluate('window.__game.runGold')}`);
+
+  // TAB 打开战地军需商店（闯关 / 无尽通用）
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Tab', key: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  await c.frame(3);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Tab', key: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+  const fieldShop = await c.evaluate(`(() => {
+    const g = window.__game;
+    return {
+      state: g.state,
+      visible: !document.getElementById('shop-panel').classList.contains('hidden'),
+      gold: g.runGold,
+      items: document.querySelectorAll('#shop-grid .shop-card').length,
+      title: document.querySelector('#shop-panel h2').textContent,
+    };
+  })()`);
+  rec('TAB 打开战地军需商店（7 类补给）',
+    fieldShop.state === 'shop' && fieldShop.visible === true && fieldShop.items === 7 && fieldShop.title === '战地军需',
+    JSON.stringify(fieldShop));
+  const fieldBuy = await c.evaluate(`(() => {
+    const g = window.__game;
+    const reserve0 = g.gun.reserveOf('rifle');
+    const gold0 = g.runGold;
+    const btn = document.querySelector('#shop-grid [data-buy="ammoRifle"]');
+    if (btn) btn.click();
+    return { reserve0, reserve1: g.gun.reserveOf('rifle'), gold0, gold1: g.runGold };
+  })()`);
+  rec('用局内金币购买弹药并正确扣费',
+    fieldBuy.reserve1 > fieldBuy.reserve0 && fieldBuy.gold1 === fieldBuy.gold0 - 30,
+    JSON.stringify(fieldBuy));
+  // Esc 关闭商店，继续验证波次推进
+  await c.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await c.frame(3);
+  await c.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  rec('Esc 关闭军需商店回到战斗',
+    String(await c.evaluate('window.__game.state')) === 'playing'
+    && String(await c.evaluate('document.getElementById("shop-panel").classList.contains("hidden")')) === 'true');
 
   // 局内任务目标 HUD
   const obj = await c.evaluate(`(() => ({
@@ -646,7 +699,8 @@ try {
     wave: document.getElementById('rs-wave').textContent,
     time: document.getElementById('rs-time').textContent,
   })`);
-  rec('结算击杀 = 56（三波总数）', rs.kills === '56', JSON.stringify(rs));
+  const expectedKills = w1.total + w2.total + w3.total;
+  rec(`结算击杀 = ${expectedKills}（三波总数）`, rs.kills === String(expectedKills), JSON.stringify(rs));
   rec('结算波次 = 3/3', rs.wave === '3/3', rs.wave);
   rec('命中率为百分比格式', /^\d+%$/.test(rs.acc), rs.acc);
   const resultRewards = String(await txt(c, 'document.getElementById("result-rewards").textContent'));

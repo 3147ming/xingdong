@@ -37,7 +37,7 @@ export const PLAYER = {
   mouseSensitivity: 0.0022,
   hitSlowTime: 0.45,      // 受击僵直持续时间
   hitSlowFactor: 0.45,    // 受击时移动速度倍率
-  armorReduction: 0.5,    // 护甲吸收伤害比例
+  armorReduction: 1.0,    // 护甲吸收伤害比例（无上限，护甲可叠加至完全吸收）
   respawnDelay: 0.9,
   startPos: { x: 8, y: 0, z: 15 },  // 出生点：货场南侧空地
   startYaw: 0,
@@ -210,7 +210,7 @@ export const ENEMY = {
   hearTime: 4.0,          // 听到枪声/子弹落地后的警觉持续时间
   flinchTime: 0.22,       // 受击抖动时间
   deathBodyTime: 5.0,     // 尸体停留时间
-  spawnFadeTime: 0.4,     // 重生淡出时长
+  spawnFadeTime: 0.85,    // 重生渐显时长（太短会像"凭空闪现"，拉长一点更自然）
   turnSpeed: 4.5,         // 转头速度略降，避免瞬间锁头像瞬移
   radius: 0.4,
   height: 1.8,
@@ -227,7 +227,7 @@ export const ENEMY = {
       name: '普通丧尸',
       maxHealth: 90,
       patrolSpeed: 1.5,
-      chaseSpeed: 3.0,      // 提高：追击速度接近玩家步行，压力更大
+      chaseSpeed: 2.7,      // 追击速度略低于玩家步行，给玩家换弹与走位窗口
       damage: 11,           // 爪击/撕咬
       attackRange: 2.15,    // 近战触及距离
       attackInterval: 1.25, // 两次攻击间隔
@@ -259,7 +259,7 @@ export const ENEMY = {
     brute: {
       id: 'brute',
       name: '重锤丧尸',
-      maxHealth: 220,
+      maxHealth: 190,        // 重狙身体一枪可带走（200 伤害）
       patrolSpeed: 1.2,
       chaseSpeed: 2.2,
       damage: 22,
@@ -277,7 +277,7 @@ export const ENEMY = {
       name: '迅捷丧尸',
       maxHealth: 48,
       patrolSpeed: 2.2,
-      chaseSpeed: 4.4,
+      chaseSpeed: 3.9,       // 仍然最快，但不至于瞬间贴脸
       damage: 8,
       attackRange: 1.9,
       attackInterval: 0.9,
@@ -310,7 +310,7 @@ export const ENEMY = {
     boss: {
       id: 'boss',
       name: '巨型丧尸',
-      maxHealth: 900,
+      maxHealth: 800,        // 重狙约 4 枪（身体），成长后可压到 2-3 枪
       patrolSpeed: 1.1,
       chaseSpeed: 2.0,
       damage: 34,
@@ -321,6 +321,44 @@ export const ENEMY = {
       melee: true,
       scaleMul: 1.55,
       tint: 0x7a2f3a,
+    },
+    // 奔跑者：血薄速极快，直线冲刺近战，成群出现
+    runner: {
+      id: 'runner',
+      name: '奔跑者',
+      maxHealth: 30,
+      patrolSpeed: 2.5,
+      chaseSpeed: 6.75,          // 普通丧尸的2.5倍
+      damage: 10,
+      attackRange: 1.8,
+      attackInterval: 0.8,
+      windup: 0.15,
+      keepDistance: 0.9,
+      melee: true,
+      runner: true,              // 标记：启用直线冲刺AI
+      scaleMul: 0.82,
+      tint: 0x5aa05a,            // 绿色皮肤，瘦长
+    },
+    // 胖子/爆破者：血厚速很慢，死亡后延时爆炸+毒雾
+    fat: {
+      id: 'fat',
+      name: '胖子',
+      maxHealth: 200,
+      patrolSpeed: 0.9,
+      chaseSpeed: 1.5,
+      damage: 25,
+      attackRange: 2.4,
+      attackInterval: 1.8,
+      windup: 0.6,
+      keepDistance: 1.5,
+      melee: true,
+      fat: true,                 // 标记：死亡后爆炸
+      explodeRadius: 5.0,
+      explodeDamage: 80,
+      fuseTime: 3.0,             // 死亡后3秒爆炸
+      poisonTime: 5.0,           // 毒雾持续5秒
+      scaleMul: 1.35,
+      tint: 0xf06a2a,            // 橙色皮肤，肥胖
     },
     // 嚎叫者：发现玩家后嘶吼，触发周围所有丧尸警觉
     howler: {
@@ -370,7 +408,7 @@ export const MATCH = {
   minSpawnDist: 13,      // 出生点与玩家的最小距离
   fallbackSpawnDist: 8,  // 所有出生点都太近时的兜底距离
   waveClearAmmo: 60,     // 每波肃清补给：备弹（守城）
-  waveClearAmmoSmall: 8, // 闯关 / 无尽：小量免费补给（弹药主要靠购买与掉落）
+  waveClearAmmoSmall: 15, // 闯关 / 无尽：小量免费补给（弹药主要靠购买与掉落）
   waveClearArmor: 20,    // 每波肃清补给：护甲
   grades: [
     { grade: 'S', min: 2400 },

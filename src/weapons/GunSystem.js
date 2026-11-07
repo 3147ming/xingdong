@@ -22,11 +22,13 @@ export class GunSystem {
     this.collision = deps.collision;
     this.enemies = deps.enemies;
     this.hud = deps.hud;
+    this.explosions = deps.explosions || null;
     this.onKill = deps.onKill || (() => {});
     this.onShot = deps.onShot || (() => {});
 
     // 改装合成后的实际武器数据（默认全部"无改装"）
     this.loadout = {};
+    this.ammoCapMul = 1;     // 科研备弹上限倍率（applyAmmoStock 注入）
     this.weapons = {};
     for (const id of WEAPON_UNLOCKED) {
       this.weapons[id] = deriveWeapon(WEAPONS[id], {});
@@ -394,6 +396,10 @@ export class GunSystem {
       } else if (wallHit) {
         hitPoint = wallHit.point;
         this.effects.spawnImpact(hitPoint, wallHit.normal);
+        // 场景可爆炸物：油桶 / 汽车被击中后点燃引信（2 秒后爆炸）
+        if (this.explosions && (wallHit.tag === 'barrel' || wallHit.tag === 'car')) {
+          this.explosions.igniteByBox(wallHit.box);
+        }
       } else {
         hitPoint = origin.clone().addScaledVector(dir, W.range);
       }
@@ -550,11 +556,31 @@ export class GunSystem {
     this._syncHud();
   }
 
+  /** 当前备弹 / 备弹上限（局内商店展示用） */
+  reserveOf(id) { return this._states[id]?.reserve ?? 0; }
+  reserveCap(id) {
+    return Math.round((AMMO_SHOP[id]?.cap || 120) * (this.ammoCapMul || 1));
+  }
+
+  /**
+   * 按武器口径补充备弹（局内战地军需使用），返回实际补充量。
+   * 上限与 applyAmmoStock 一致，受科研备弹加成影响。
+   */
+  addSupplyFor(id, rounds) {
+    const st = this._states[id];
+    if (!st) return 0;
+    const before = st.reserve;
+    st.reserve = Math.min(this.reserveCap(id), st.reserve + Math.max(0, rounds));
+    this._syncHud();
+    return st.reserve - before;
+  }
+
   /**
    * 把局外备弹库存带入本局（闯关 / 无尽）。
    * 每把武器弹匣免费装满，备弹取库存，库存上限按科研加成放大。
    */
   applyAmmoStock(stock = {}, capMul = 1) {
+    this.ammoCapMul = capMul;
     for (const id of WEAPON_UNLOCKED) {
       const st = this._states[id];
       const cap = Math.round((AMMO_SHOP[id]?.cap || 120) * capMul);

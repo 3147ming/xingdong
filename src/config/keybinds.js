@@ -45,7 +45,8 @@ export const KEY_ACTIONS = [
   { id: 'skill7', label: '技能 7', group: '技能', def: 'KeyO' },
 
   // ---- 界面 ----
-  { id: 'panel', label: '机甲 / 天赋 / 觉醒面板', group: '界面', def: 'Tab' },
+  { id: 'panel', label: '军需商店 / 大厅面板', group: '界面', def: 'Tab' },
+  { id: 'growth', label: '成长面板（机甲 / 天赋 / 觉醒）', group: '界面', def: 'KeyV' },
   { id: 'map', label: '地图', group: '界面', def: 'Backquote' },
   { id: 'pause', label: '暂停 / 返回', group: '界面', def: 'Escape' },
 

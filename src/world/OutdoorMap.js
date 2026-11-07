@@ -32,6 +32,7 @@ export class OutdoorMap {
     this.playerSpawn = this.builder.playerSpawn;
     this.waypoints = this.builder.waypoints;
     this.spawnPoints = this.builder.spawnPoints;
+    this.explodables = this.builder.explodables;   // 油桶 / 汽车等可爆炸物
     return this;
   }
 }

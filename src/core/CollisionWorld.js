@@ -126,6 +126,7 @@ export class CollisionWorld {
           point: origin.clone().addScaledVector(dir, hit.distance),
           normal: hit.normal,
           tag: b.tag,
+          box: b,
         };
       }
     }

@@ -48,6 +48,24 @@ export class DefenseUI {
     this.weaponAmmo = this.weaponEl.querySelector('#special-ammo');
     this.weaponHeat = this.weaponEl.querySelector('#special-heat-fill');
     this.weaponHint = this.weaponEl.querySelector('#special-hint');
+
+    // 闯关 / 无尽的局内金币（守城模式用上面的 statusEl，不重复显示）
+    this.runGoldEl = document.createElement('div');
+    this.runGoldEl.id = 'run-gold';
+    this.runGoldEl.className = 'run-gold hidden';
+    this.runGoldEl.innerHTML = '<i class="res-dot coin"></i>局内金币 <b id="run-gold-value">0</b>';
+    host.appendChild(this.runGoldEl);
+    this.runGoldValue = this.runGoldEl.querySelector('#run-gold-value');
+  }
+
+  /** 更新局内战地金币 */
+  setRunGold(n) {
+    if (this.runGoldValue) this.runGoldValue.textContent = String(Math.round(n));
+  }
+
+  /** 显示 / 隐藏局内金币条（守城模式隐藏，用核心面板里的金币行） */
+  setRunGoldVisible(on) {
+    if (this.runGoldEl) this.runGoldEl.classList.toggle('hidden', !on);
   }
 
   _buildShop() {
@@ -67,9 +85,12 @@ export class DefenseUI {
     ].join('');
     document.body.appendChild(this.shopEl);
     this.shopSub = this.shopEl.querySelector('#shop-sub');
+    this.shopTitle = this.shopEl.querySelector('h2');
+    this.shopKicker = this.shopEl.querySelector('.result-kicker');
     this.shopGold = this.shopEl.querySelector('#shop-gold');
     this.shopGrid = this.shopEl.querySelector('#shop-grid');
     this.shopFeedback = this.shopEl.querySelector('#shop-feedback');
+    this.shopContinue = this.shopEl.querySelector('#btn-shop-continue');
     this.shopGrid.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-buy]');
       if (!btn || btn.disabled) return;
@@ -129,6 +150,9 @@ export class DefenseUI {
 
   showShop(state, wave, buyLabel = '部署') {
     this.buyLabel = buyLabel;
+    if (this.shopTitle) this.shopTitle.textContent = '波间军需';
+    if (this.shopKicker) this.shopKicker.textContent = 'WAVE CLEARED';
+    if (this.shopContinue) this.shopContinue.textContent = '继续下一波';
     this.shopSub.textContent = `第 ${wave} 波已肃清 · 布置火力网后再迎接下一波`;
     this.shopFeedback.textContent = '';
     this.updateShop(state);

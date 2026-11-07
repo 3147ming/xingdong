@@ -48,6 +48,12 @@ export class Menu {
         this.callbacks.onRestart && this.callbacks.onRestart();
       });
     }
+    this.btnNextLevel = document.getElementById('btn-next-level');
+    if (this.btnNextLevel) {
+      this.btnNextLevel.addEventListener('click', () => {
+        this.callbacks.onNextLevel && this.callbacks.onNextLevel();
+      });
+    }
     const btnMenu = document.getElementById('btn-menu');
     if (btnMenu) {
       btnMenu.addEventListener('click', () => {
@@ -147,6 +153,11 @@ export class Menu {
       this.rs.time.textContent = `${m}:${String(s).padStart(2, '0')}`;
     }
     if (this.rs.dmg) this.rs.dmg.textContent = String(r.damageTaken);
+    // 闯关胜利且还有下一关：显示「进入下一关」
+    if (this.btnNextLevel) {
+      this.btnNextLevel.classList.toggle('hidden', !r.nextLevel);
+      if (r.nextLevel) this.btnNextLevel.textContent = `进入第 ${r.nextLevel} 关`;
+    }
     if (this.rs.wave) {
       this.rs.wave.textContent = r.infinite
         ? `${r.wavesCleared} 波`

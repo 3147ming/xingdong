@@ -181,6 +181,8 @@ export class MapBuilder {
     this.layout = layout;
     this.group = new THREE.Group();
     this.sceneObjects = [];   // 直接挂在 scene 上的灯光，切换地图时一并移除
+    this.barrels = [];        // 可爆炸物：油桶位置
+    this.cars = [];           // 可爆炸物：汽车位置
 
     const spawn = layout.startPos || PLAYER.startPos;
     this.playerSpawn = new THREE.Vector3(spawn.x, spawn.y || 0, spawn.z);
@@ -238,6 +240,11 @@ export class MapBuilder {
       o.updateMatrix();
     });
     this.scene.add(this.group);
+
+    // 汇总所有可爆炸物供 ExplosionSystem 注册
+    this.explodables = this.barrels.map((b) => ({ ...b, tag: 'barrel' }))
+      .concat(this.cars.map((c) => ({ ...c, tag: 'car' })));
+
     return this;
   }
 
@@ -545,7 +552,8 @@ export class MapBuilder {
         dummy.rotation.set(0, Math.random() * Math.PI, 0);
         dummy.updateMatrix();
         barrelMesh.setMatrixAt(i, dummy.matrix);
-        this.collision.addBox(x, 0.475, z, 0.7, 0.95, 0.7, 'barrel');
+        const box = this.collision.addBox(x, 0.475, z, 0.7, 0.95, 0.7, 'barrel');
+        this.barrels.push({ position: new THREE.Vector3(x, 0.475, z), box });
       });
       barrelMesh.instanceMatrix.needsUpdate = true;
       barrelMesh.castShadow = true;
@@ -659,7 +667,8 @@ export class MapBuilder {
         g.position.set(cx, 0, cz);
         g.rotation.y = ry;
         this.group.add(g);
-        this.collision.addBox(cx, 1.2, cz, 4.6, 2.4, 2.2, 'crate');
+        const box = this.collision.addBox(cx, 1.2, cz, 4.6, 2.4, 2.2, 'car');
+        this.cars.push({ position: new THREE.Vector3(cx, 0, cz), box });
       }
     }
   }

@@ -57,12 +57,19 @@ export class EnemyAI {
     this.lastPos = this.position.clone();
     this.fuseStarted = false;   // 自爆丧尸：是否已开始引爆倒计时
     this.fuseTimer = 0;
+    this.dashTimer = 0;         // 奔跑者：直线冲刺剩余时间
+    this.dashCooldown = 0;      // 奔跑者：冲刺冷却剩余时间
     this.spawnFade = 0;         // 重生淡出剩余时间（>0 表示正在渐显）
     this.chaseLinger = 0;       // 发现玩家后的追击延迟（>0 时仍停留在 alert）
     this._animSwitchTimer = 0;  // 动画切换冷却，避免 run/attack 频繁抖动
     this.roarCooldown = 0;      // howler 嘶吼冷却
     this._hearTimer = 0;        // 听到枪声/子弹落地后的警觉倒计时
     this._hearPos = null;       // 声源位置，听到后朝此处移动
+    this._knockCooldown = 0;    // 击退限频：连射时不让击退叠加成瞬移
+    this.baseEmissive = new THREE.Color(0x000000);  // 变体基础自发光（远处不至于成为纯黑影）
+    this._dashDir = new THREE.Vector3();   // 奔跑者：直线冲刺方向（锁定后不再转向）
+    this._poisonCloud = null;              // 胖子：死亡后遗留的毒雾网格
+    this._poisonTick = 0;                  // 胖子：毒雾伤害打点计时
 
     // 波次倍率（EnemyManager.configure 注入）
     this.healthMul = 1;
@@ -88,8 +95,14 @@ export class EnemyAI {
     this.melee = v.melee !== false;      // 只有 spitter 是远程喷吐
     this.maxHealth = v.maxHealth * this.healthMul;
     this.health = this.maxHealth;
+    // 基础自发光：让远处丧尸轮廓可辨，不再是纯黑影（"影子飞扑"的观感来源之一）
+    const tint = v.tint || 0x9aa878;
+    this.baseEmissive.setHex(tint).multiplyScalar(0.10);
     if (this.materials) {
-      for (const m of this.materials) m.color.setHex(v.tint || 0xffffff);
+      for (const m of this.materials) {
+        m.color.setHex(tint);
+        m.emissive.copy(this.baseEmissive);
+      }
     }
   }
 
@@ -181,19 +194,22 @@ export class EnemyAI {
     this._play('idle');
   }
 
-  _play(name, once = false) {
+  _play(name, once = false, force = false, clamp = false) {
     // 动画切换冷却：避免 run/attack 紧邻切换时 fadeIn/Out 叠加导致视觉抖动
-    if (this._animSwitchTimer > 0) return;
+    // force=true 用于「前摇结束 / 复活 / 死亡」等必须立即生效的切换
+    if (!force && this._animSwitchTimer > 0) return;
     const action = this.actions && this.actions[name];
     if (!action || this.currentAnim === name) return;
-    if (this.currentAction) this.currentAction.fadeOut(0.18);
+    if (this.currentAction) this.currentAction.fadeOut(0.15);
     action.reset();
     action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
-    action.clampWhenFinished = once;
-    action.fadeIn(0.18).play();
+    // 只有死亡这类定格姿势需要 clamp；攻击动画播完必须能回到 run，
+    // 否则 currentAnim 会一直停在 attack，丧尸卡死在原地
+    action.clampWhenFinished = clamp;
+    action.fadeIn(0.15).play();
     this.currentAction = action;
     this.currentAnim = name;
-    this._animSwitchTimer = 0.08;
+    this._animSwitchTimer = 0.05;
   }
 
   // ---------------- 血条 ----------------
@@ -285,26 +301,43 @@ export class EnemyAI {
   update(dt) {
     if (this.mixer) this.mixer.update(dt);
     this._animSwitchTimer = Math.max(0, this._animSwitchTimer - dt);
+    this._knockCooldown = Math.max(0, this._knockCooldown - dt);
 
-    // 重生淡出：从透明渐显到完全可见，避免凭空闪现
+    // 重生渐显：从透明过渡到完全可见，避免凭空闪现
     if (this.spawnFade > 0) {
       this.spawnFade -= dt;
-      const k = 1 - Math.max(0, this.spawnFade) / (ENEMY.spawnFadeTime || 0.4);
+      const total = ENEMY.spawnFadeTime || 0.4;
+      const k = Math.min(1, 1 - Math.max(0, this.spawnFade) / total);
       for (const m of this.materials) {
+        m.transparent = true;
         m.opacity = k;
-        if (k >= 1) { m.transparent = false; m.opacity = 1; }
+        m.depthWrite = k >= 1;
+      }
+      if (this.spawnFade <= 0) {
+        for (const m of this.materials) {
+          m.transparent = false;
+          m.opacity = 1;
+          m.depthWrite = true;
+        }
       }
     }
 
-    // 受击红闪
+    // 受击红闪：快速衰减到基础自发光，连射时不会持续发红（"闪烁"的来源）
     if (this.flashTimer > 0) {
       this.flashTimer -= dt;
-      const k = Math.max(0, this.flashTimer / 0.15);
-      for (const m of this.materials) {
-        m.emissive.setRGB(k * 0.9, 0, 0);
-      }
       if (this.flashTimer <= 0) {
-        for (const m of this.materials) m.emissive.setRGB(0, 0, 0);
+        this.flashTimer = 0;
+        for (const m of this.materials) m.emissive.copy(this.baseEmissive);
+      } else {
+        const k = this.flashTimer / 0.16;
+        const e = k * k;    // 二次衰减：一开始亮，随即可见地暗下去
+        for (const m of this.materials) {
+          m.emissive.setRGB(
+            this.baseEmissive.r + e * 0.85,
+            this.baseEmissive.g,
+            this.baseEmissive.b
+          );
+        }
       }
     }
 
@@ -318,6 +351,50 @@ export class EnemyAI {
         }
       }
       if (this.deadTimer <= 0) this.root.visible = false;
+
+      // 胖子死亡后遗留毒雾：尸体淡出期间仍对范围内玩家持续造成毒伤
+      if (this._poisonCloud) {
+        this._poisonEndTime -= dt;
+        this._poisonTick += dt;
+        if (this._poisonTick >= 1.0) {
+          this._poisonTick = 0;
+          if (this.player && !this.player.dead) {
+            const dx = this.player.position.x - this.position.x;
+            const dz = this.player.position.z - this.position.z;
+            const d = Math.hypot(dx, dz);
+            if (d < this.variant.explodeRadius) {
+              const dealt = this.player.takeDamage(this.variant.damage * 0.4 * this.damageMul);
+              if (dealt > 0) this.onPlayerHit(dealt);
+            }
+          }
+        }
+        if (this._poisonEndTime <= 0) {
+          if (this._poisonCloud.parent) this.scene.remove(this._poisonCloud);
+          this._poisonCloud = null;
+        }
+      }
+      return;
+    }
+
+    // 胖子死亡倒计时（dying）：闪烁预警，超时触发爆炸
+    if (this.state === 'dying') {
+      this.fuseTimer -= dt;
+      const blink = Math.sin(this.fuseTimer * 40) > 0 ? 1 : 0.35;
+      for (const m of this.materials) {
+        m.emissive.setRGB(blink, blink * 0.18, 0);
+      }
+      if (this.fuseTimer <= 0) {
+        this._explode();
+        // 爆炸后进入真正的尸体状态，走尸体淡出流程
+        this.dead = true;
+        this.state = 'dead';
+        this.deadTimer = ENEMY.deathBodyTime;
+        this.bar.visible = false;
+        this.flashTimer = 0;
+        for (const m of this.materials) m.emissive.copy(this.baseEmissive);
+        return;
+      }
+      this._movePhysics(dt);
       return;
     }
 
@@ -384,18 +461,14 @@ export class EnemyAI {
 
     if (this.state === 'patrol') this._updatePatrol(dt);
     else if (this.state === 'alert') this._updateAlert(dt);
-    else if (this.state === 'chase') this._updateChase(dt, distToPlayer);
+    else if (this.state === 'chase') {
+      if (this._updateChase(dt, distToPlayer)) return;   // 奔跑者冲刺已自行处理物理
+    }
     else if (this.state === 'attack') this._updateAttack(dt, distToPlayer);
 
     // 平滑转头，受击时附加抖动
     const turnDelta = shortestAngle(this.targetHeading - this.heading);
     this.heading += turnDelta * Math.min(1, ENEMY.turnSpeed * dt);
-
-    // 近战前摇期间锁移动：避免一边抬手一边冲向玩家的突兀感
-    if (this.windupTimer > 0 && this.melee) {
-      this.velocity.x *= 0.05;
-      this.velocity.z *= 0.05;
-    }
 
     // 物理移动
     this.velocity.y += -16 * dt;
@@ -439,6 +512,39 @@ export class EnemyAI {
 
   _updateChase(dt, dist) {
     if (!this.player) return;
+    const v = this.variant;
+
+    // 奔跑者：冷却结束时向玩家方向发起直线冲刺，冲刺期间锁定方向不转弯
+    if (v.runner) {
+      if (this.dashCooldown > 0) this.dashCooldown -= dt;
+      if (this.dashTimer > 0) {
+        // 冲刺中：沿锁定方向直线加速，不受避障与转向影响
+        this.dashTimer -= dt;
+        this.velocity.x = this._dashDir.x * v.chaseSpeed * 1.9;
+        this.velocity.z = this._dashDir.z * v.chaseSpeed * 1.9;
+        this._play('run');
+        this.targetHeading = Math.atan2(this._dashDir.x, this._dashDir.z);
+        this._movePhysics(dt);
+        return true;
+      }
+      if (dist > v.attackRange && this.dashCooldown <= 0) {
+        this.dashTimer = 0.45;                 // 冲刺持续 0.45s
+        this.dashCooldown = 2.6;               // 冲刺冷却 2.6s
+        this._dashDir.set(
+          Math.sin(this.heading) || (this.player.position.x - this.position.x),
+          0,
+          Math.cos(this.heading) || (this.player.position.z - this.position.z)
+        );
+        const len = Math.hypot(this._dashDir.x, this._dashDir.z);
+        if (len > 0) {
+          this._dashDir.x /= len;
+          this._dashDir.z /= len;
+        }
+        this._play('run');
+        return;
+      }
+    }
+
     // 听到枪声但未见玩家：朝声源移动；看到玩家后再朝玩家逼近
     let dx = this.player.position.x - this.position.x;
     let dz = this.player.position.z - this.position.z;
@@ -472,16 +578,22 @@ export class EnemyAI {
     if (this.melee) {
       this.targetHeading = Math.atan2(dx, dz);
 
-      // 前摇/攻击动画期间：锁移动，完全停留在原地挥爪
-      if (this.windupTimer > 0 || this.currentAnim === 'attack') {
-        // 只转向，不移动；攻击动画播完会自动回到 run
-        // 前摇 → 判定 两段式攻击
-        if (this.windupTimer > 0) {
-          this.windupTimer -= dt;
-          if (this.windupTimer <= 0 && !this.windupDone) {
-            this.windupDone = true;
-            this._meleeStrike(dist);
-          }
+      // 前摇期间：锁移动 + 播放 attack 动画，前摇结束才结算伤害。
+      // 注意：不能用 currentAnim === 'attack' 当作状态门控 —— 攻击动画是
+      // LoopOnce，播完后 currentAnim 会一直停在 attack，丧尸会永久卡死原地，
+      // 玩家一走远又突然全速追上来，观感上就是"影子飞速扑过来"。
+      if (this.windupTimer > 0) {
+        this.windupTimer -= dt;
+        // 不是瞬间归零，而是快速衰减，避免急刹般的瞬停
+        const brake = Math.max(0, 1 - dt * 14);
+        this.velocity.x *= brake;
+        this.velocity.z *= brake;
+        if (this.windupTimer <= 0 && !this.windupDone) {
+          this.windupDone = true;
+          this._meleeStrike(dist);
+          // 挥击落地后立刻回到 run，让丧尸重新参与追击，不再定格
+          this.currentAnim = null;
+          this._play('run', false, true);
         }
         return;
       }
@@ -505,12 +617,12 @@ export class EnemyAI {
 
       // 冷却到点且在触及范围内 → 开始前摇 + 播放 attack 动画
       if (this.attackTimer <= 0 && dist <= v.attackRange) {
-        this.windupTimer = v.windup;
+        this.windupTimer = v.windup || 0.35;
         this.windupDone = false;
         this.attackTimer = v.attackInterval;
         this.onMelee(this);
         this.currentAnim = null;          // 允许 attack 动画重新播放
-        this._play('attack', true);
+        this._play('attack', true, true);
       } else {
         this._play('run');
       }
@@ -531,10 +643,10 @@ export class EnemyAI {
           this.fuseTimer = v.fuseTime;
           this.onMelee(this); // 复用"开始攻击"回调（触发音效等）
         }
-        // 闪烁红光警告
-        if (this.flashMat) {
-          const blink = Math.sin(this.fuseTimer * 40) > 0 ? 1 : 0.3;
-          this.flashMat.emissive.setRGB(1 * blink, 0.2 * blink, 0);
+        // 闪烁橙光警告（用自身材质，之前引用了不存在的 flashMat 导致没有效果）
+        const blink = Math.sin(this.fuseTimer * 40) > 0 ? 1 : 0.35;
+        for (const m of this.materials) {
+          m.emissive.setRGB(blink, blink * 0.18, 0);
         }
         this.fuseTimer -= dt;
         if (this.fuseTimer <= 0) {
@@ -596,6 +708,23 @@ export class EnemyAI {
         const dealt = this.player.takeDamage(dmg);
         if (dealt > 0) this.onPlayerHit(dealt);
       }
+    }
+    // 胖子死亡爆炸：遗留毒雾范围，持续秒数由 poisonTime 决定
+    if (v.fat) {
+      this._poisonCloud = new THREE.Mesh(
+        new THREE.SphereGeometry(radius * 1.6, 16, 16),
+        new THREE.MeshBasicMaterial({
+          color: 0x22aa22,
+          transparent: true,
+          opacity: 0.25,
+          depthWrite: false,
+        })
+      );
+      this._poisonCloud.position.copy(this.position);
+      this._poisonCloud.position.y = 0.6;
+      this.scene.add(this._poisonCloud);
+      this._poisonEndTime = v.poisonTime || 5.0;
+      this._poisonTick = 0;
     }
     // 爆炸特效 + 音效（通过回调交给 Game 层处理）
     if (this.onExplode) this.onExplode(this);
@@ -663,7 +792,20 @@ export class EnemyAI {
       this.velocity.x = (this.velocity.x / sp) * maxSpeed;
       this.velocity.z = (this.velocity.z / sp) * maxSpeed;
     }
-    this.targetHeading = Math.atan2(this.velocity.x, this.velocity.z);
+    // 朝向用「期望方向」而不是速度向量：速度接近 0 时速度向量的角度会剧烈跳动，
+    // 模型就会左右抖动（用户看到的"闪烁"）
+    this.targetHeading = Math.atan2(dirX, dirZ);
+  }
+
+  /** 执行物理移动（奔跑者冲刺时绕过 _moveToward 的减速与避障） */
+  _movePhysics(dt) {
+    this.velocity.y += -16 * dt;
+    this.collision.moveCharacter(this.position, this.velocity, dt, ENEMY.radius, ENEMY.height);
+    this.root.position.copy(this.position);
+    const flinchK = this.flinchTimer > 0 ? this.flinchTimer / ENEMY.flinchTime : 0;
+    this.root.rotation.y = this.heading + Math.sin(this.flinchTimer * 18) * 0.12 * flinchK;
+    this.bar.position.set(0, ENEMY.height + 0.3, 0);
+    this._checkStuck(dt);
   }
 
   _checkStuck(dt) {
@@ -743,10 +885,14 @@ export class EnemyAI {
   // ---------------- 伤害 ----------------
   takeDamage(amount) {
     if (this.dead) return false;
+    // 胖子已进入 delayed 起爆倒计时：不再吃伤害，避免重复走 _die() 打断爆炸
+    if (this.state === 'dying') return false;
     this.health -= amount;
-    this.flashTimer = 0.15;
+    // 红闪只在原本没在闪的时候点亮，连射（尤其霰弹 8 颗弹丸）不会一直发红
+    if (this.flashTimer <= 0) this.flashTimer = 0.16;
     this.flinchTimer = ENEMY.flinchTime;
-    if (this.player && !this.player.dead) {
+    if (this.player && !this.player.dead && this._knockCooldown <= 0) {
+      // 击退限频：每颗弹丸都推一把会叠加成瞬移，观感像影子飞扑
       const dx = this.position.x - this.player.position.x;
       const dz = this.position.z - this.player.position.z;
       const len = Math.hypot(dx, dz) || 1;
@@ -754,6 +900,7 @@ export class EnemyAI {
       this.velocity.z += (dz / len) * 1.2;
       this.avoidTimer = 0.5;
       this.avoidSign = Math.random() < 0.5 ? -1 : 1;
+      this._knockCooldown = 0.10;
       this.lastKnown.copy(this.player.position);
     }
     this._updateBar();
@@ -775,13 +922,33 @@ export class EnemyAI {
   }
 
   _die() {
+    // 胖子：死亡后延时爆炸+毒雾，不立即进入 dead 状态，先进入 dying 倒计时
+    if (this.variant.fat && !this.fuseStarted) {
+      this.fuseStarted = true;
+      this.fuseTimer = this.variant.fuseTime;
+      this.state = 'dying';
+      this.velocity.set(0, 0, 0);
+      this.bar.visible = false;
+      this.windupTimer = 0;
+      this.windupDone = false;
+      this.flashTimer = 0;
+      for (const m of this.materials) m.emissive.copy(this.baseEmissive);
+      this._play('death', true, true, true);
+      this.onDeath(this);  // 死亡时已算作击杀（掉落/金币等）
+      return;
+    }
     this.dead = true;
     this.state = 'dead';
     this.deadTimer = ENEMY.deathBodyTime;
     this.velocity.set(0, 0, 0);
     this.bar.visible = false;
     this.windupTimer = 0;
-    this._play('death', true);
+    this.windupDone = false;
+    this.fuseStarted = false;
+    // 清掉红闪 / 自爆预警的残留发光，否则尸体会一直亮着
+    this.flashTimer = 0;
+    for (const m of this.materials) m.emissive.copy(this.baseEmissive);
+    this._play('death', true, true, true);
     this.onDeath(this);
   }
 
@@ -813,6 +980,9 @@ export class EnemyAI {
     this.scanTime = 0;
     this.fuseStarted = false;
     this.fuseTimer = 0;
+    this._poisonCloud = null;
+    this._poisonEndTime = 0;
+    this._poisonTick = 0;
     this.heading = Math.random() * Math.PI * 2;
     this.targetHeading = this.heading;
     this.targetPoint = this._pickPatrolPoint();
@@ -820,17 +990,21 @@ export class EnemyAI {
     this.chaseLinger = 0;
     this._animSwitchTimer = 0;
     this.roarCooldown = 0;
+    this._knockCooldown = 0;
+    this.flashTimer = 0;
     // 重生淡出：从透明渐显，避免凭空"闪现"在视野内
     this.spawnFade = ENEMY.spawnFadeTime || 0.4;
     for (const m of this.materials) {
       m.opacity = 0;
       m.transparent = true;
+      m.depthWrite = false;
       m.visible = true;
+      m.emissive.copy(this.baseEmissive);
     }
     this.bar.visible = false;
     this._updateBar();
     this.currentAnim = null;
-    this._play('idle');
+    this._play('idle', false, true);
   }
 
   /** 射线与丧尸命中球求交（用于玩家射击）；返回 part: head / body / limb */

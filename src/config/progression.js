@@ -124,6 +124,7 @@ export const RESEARCH = {
       { coins: 800, material: 5, bossCore: 1 },
       { coins: 1200, material: 8, bossCore: 1, map: 'mapYard' },
     ],
+    step: { coins: 500, material: 4, bossCore: 1 },
     effects: { ammoCapMul: 0.2, reloadCutMul: 0.05 },
   },
   firepower: {
@@ -139,6 +140,7 @@ export const RESEARCH = {
       { coins: 900, material: 5, bossCore: 1 },
       { coins: 1400, material: 8, bossCore: 1, map: 'mapDock' },
     ],
+    step: { coins: 500, material: 4, bossCore: 1 },
     effects: { dmgMul: 0.02, critChance: 0.02 },
   },
   survival: {
@@ -154,6 +156,7 @@ export const RESEARCH = {
       { coins: 800, material: 5, bossCore: 1 },
       { coins: 1200, material: 8, bossCore: 1, map: 'mapGarage' },
     ],
+    step: { coins: 500, material: 4, bossCore: 1 },
     effects: { hpPerLevel: 8, armorPerLevel: 4 },
   },
   logistics: {
@@ -169,6 +172,7 @@ export const RESEARCH = {
       { coins: 800, material: 5, bossCore: 1 },
       { coins: 1200, material: 8, bossCore: 1, map: 'mapLogistics' },
     ],
+    step: { coins: 400, material: 3, bossCore: 1 },
     effects: { dropChanceMul: 0.08 },
   },
   weakpoint: {
@@ -184,6 +188,7 @@ export const RESEARCH = {
       { coins: 1100, material: 6, bossCore: 1 },
       { coins: 1600, material: 10, bossCore: 2, map: 'mapArena' },
     ],
+    step: { coins: 600, material: 5, bossCore: 1 },
     effects: { headshotMul: 0.05, bossMul: 0.05 },
   },
   income: {
@@ -199,6 +204,7 @@ export const RESEARCH = {
       { coins: 900, material: 5, bossCore: 1 },
       { coins: 1400, material: 8, bossCore: 1, map: 'mapDefense' },
     ],
+    step: { coins: 500, material: 4 },
     effects: { coinMul: 0.05, xpMul: 0.05 },
   },
 };
@@ -206,7 +212,7 @@ export const RESEARCH = {
 /** 研究线顺序（UI 渲染用） */
 export const RESEARCH_ORDER = ['ballistics', 'firepower', 'survival', 'logistics', 'weakpoint', 'income'];
 
-/** 汇总科研加成（level 均为 0~5） */
+/** 汇总科研加成（level 可无限叠加，无上限） */
 export function researchTotals(data = {}) {
   const levels = data.research || {};
   const out = {
@@ -216,7 +222,7 @@ export function researchTotals(data = {}) {
   };
   for (const id of RESEARCH_ORDER) {
     const def = RESEARCH[id];
-    const lv = Math.max(0, Math.min(def.levels.length, levels[id] || 0));
+    const lv = Math.max(0, levels[id] || 0);
     if (!lv) continue;
     const e = def.effects;
     if (e.ammoCapMul) out.ammoCapMul += e.ammoCapMul * lv;

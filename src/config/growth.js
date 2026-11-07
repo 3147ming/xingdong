@@ -9,9 +9,9 @@
  * 这里只放纯数据与纯函数，不碰存档与场景，方便单测。
  */
 
-/** 等级与经验 */
+/** 等级与经验（无等级上限，经验可无限累计升级） */
 export const LEVEL = {
-  max: 60,
+  max: Infinity,
   xpPerKill: 10,
   xpPerWave: 40,
   xpWin: 200,
@@ -21,18 +21,19 @@ export const LEVEL = {
 
 /** 升到下一级所需经验（当前等级 → 下一级） */
 export function xpToNext(level) {
-  return 100 + (Math.max(1, level) - 1) * 50;
+  // 每级递增 80：Lv5 约 1 局、Lv10 约 3.5 局、Lv20 约 12 局，成长按局数铺开
+  return 200 + (Math.max(1, level) - 1) * 80;
 }
 
-/** 属性点：每点加成与上限 */
+/** 属性点：每点加成与上限（无上限，成本持续递增由 SaveManager 控制） */
 export const ATTRIBUTES = {
-  hp: { id: 'hp', name: '体能', desc: '最大生命 +8', perPoint: 8, max: 25 },
-  armor: { id: 'armor', name: '护甲', desc: '最大护甲 +5', perPoint: 5, max: 25 },
-  dmg: { id: 'dmg', name: '火力', desc: '武器伤害 +2%', perPoint: 0.02, max: 25 },
-  speed: { id: 'speed', name: '机动', desc: '移动速度 +1.5%', perPoint: 0.015, max: 25 },
+  hp: { id: 'hp', name: '体能', desc: '最大生命 +8', perPoint: 8, max: Infinity },
+  armor: { id: 'armor', name: '护甲', desc: '最大护甲 +5', perPoint: 5, max: Infinity },
+  dmg: { id: 'dmg', name: '火力', desc: '武器伤害 +2%', perPoint: 0.02, max: Infinity },
+  speed: { id: 'speed', name: '机动', desc: '移动速度 +1.5%', perPoint: 0.015, max: Infinity },
 };
 
-/** 天赋：三条分支，各 5 级；costs[i] 为升到 i+1 级的花费 */
+/** 天赋：三条分支，前 5 级按 costs 配置，超出后成本持续递增（无上限） */
 export const TALENTS = {
   atk: {
     id: 'atk',
@@ -47,6 +48,7 @@ export const TALENTS = {
       { coins: 600, awaken: 5 },
       { coins: 900, awaken: 8 },
     ],
+    step: { coins: 300, awaken: 2 },
   },
   def: {
     id: 'def',
@@ -61,6 +63,7 @@ export const TALENTS = {
       { coins: 600, awaken: 5 },
       { coins: 900, awaken: 8 },
     ],
+    step: { coins: 300, awaken: 2 },
   },
   mob: {
     id: 'mob',
@@ -75,15 +78,23 @@ export const TALENTS = {
       { coins: 600, awaken: 5 },
       { coins: 900, awaken: 8 },
     ],
+    step: { coins: 300, awaken: 2 },
   },
 };
 
-/** 天赋升级花费；已满级返回 null */
+/** 天赋升级花费；已满 5 级后成本持续递增，永不返回 null（无上限） */
 export function talentCost(branch, currentLevel) {
   const def = TALENTS[branch];
   if (!def) return null;
-  if (currentLevel >= def.costs.length) return null;
-  return def.costs[currentLevel];
+  const idx = currentLevel; // 升到 currentLevel+1 级的花费，下标从 0 开始
+  if (idx < def.costs.length) return def.costs[idx];
+  // 超过配置的 5 级：按第 5 级成本递推，每级额外 +step
+  const last = def.costs[def.costs.length - 1];
+  const over = idx - def.costs.length + 1;
+  return {
+    coins: last.coins + def.step.coins * over,
+    awaken: last.awaken + def.step.awaken * over,
+  };
 }
 
 /**
@@ -144,8 +155,8 @@ export function growthTotals(data = {}) {
   const dmgMul = 1 + (perm.dmg || 0) * ATTRIBUTES.dmg.perPoint + (tal.atk || 0) * TALENTS.atk.dmgPerLevel;
   const fireRateMul = 1 + (tal.atk || 0) * TALENTS.atk.fireRatePerLevel;
   const speedMul = 1 + (perm.speed || 0) * ATTRIBUTES.speed.perPoint + (tal.mob || 0) * TALENTS.mob.speedPerLevel;
-  // 换弹：等级越高耗时越短，最低压到 60%
-  const reloadMul = Math.max(0.6, 1 - (tal.mob || 0) * TALENTS.mob.reloadPerLevel);
+  // 换弹：等级越高耗时越短，无下限（可无限加快）
+  const reloadMul = 1 - (tal.mob || 0) * TALENTS.mob.reloadPerLevel;
   return { maxHpBonus, maxArmorBonus, dmgMul, speedMul, fireRateMul, reloadMul };
 }
 

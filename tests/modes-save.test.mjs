@@ -40,22 +40,29 @@ test('无尽模式：变体配额总数等于 total（首领额外不计入）',
   }
 });
 
-test('无尽模式：数量与血量都有硬上限', () => {
-  const w = endlessWave(999);
-  assert.equal(w.total, ENDLESS.maxTotal);
-  assert.equal(w.alive, ENDLESS.maxAlive);
-  assert.ok(w.healthMul <= ENDLESS.healthCap + 1e-9);
+test('无尽模式：数量与血量持续攀升，无波数上限', () => {
+  const w999 = endlessWave(999);
+  const w1000 = endlessWave(1000);
+  // 数量不再触顶：每波 +2，不再卡在 maxTotal
+  assert.equal(w999.total, ENDLESS.baseTotal + ENDLESS.totalStep * (999 - 1));
+  assert.equal(w1000.total, w999.total + ENDLESS.totalStep);
+  // 血量不再触顶：每波复利攀升，不再卡在 healthCap
+  assert.ok(w999.healthMul > ENDLESS.healthCap);
+  assert.ok(w1000.healthMul > w999.healthMul);
 });
 
-test('无尽模式：每 10 波出现首领，其余波次没有', () => {
-  assert.equal(endlessWave(10).mix.boss, 1);
-  assert.equal(endlessWave(20).mix.boss, 1);
-  assert.equal(endlessWave(9).mix.boss, undefined);
+test('无尽模式：按 ENDLESS.bossEvery 出现首领，其余波次没有', () => {
+  const n = ENDLESS.bossEvery;
+  assert.equal(endlessWave(n).mix.boss, 1);
+  assert.equal(endlessWave(n * 2).mix.boss, 1);
+  assert.equal(endlessWave(n - 1).mix.boss, undefined);
 });
 
-test('平衡上限：伤害与移速加成有明确上限', () => {
-  assert.ok(BALANCE.maxDamageBonus <= 0.6 + 1e-9);
-  assert.ok(BALANCE.maxSpeedBonus <= 0.25 + 1e-9);
+test('平衡上限：所有成长维度均无上限（Infinity）', () => {
+  assert.equal(BALANCE.maxDamageBonus, Infinity);
+  assert.equal(BALANCE.maxSpeedBonus, Infinity);
+  assert.equal(BALANCE.maxHealthBonus, Infinity);
+  assert.equal(BALANCE.maxArmorBonus, Infinity);
 });
 
 test('守城模式：十轮波次表长度与数量递增', () => {

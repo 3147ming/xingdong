@@ -1196,6 +1196,31 @@ html, body {
   color: var(--accent);
 }
 
+/* 闯关 / 无尽：局内战地金币（波间 / 关卡间商店通用） */
+.run-gold {
+  position: absolute;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 16px;
+  background: rgba(8, 12, 16, 0.74);
+  border: 1px solid rgba(255, 176, 32, 0.35);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.run-gold b {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 14px;
+  color: var(--accent);
+}
+.run-gold.hidden { display: none; }
+
 .interact-tip {
   position: absolute;
   left: 50%;

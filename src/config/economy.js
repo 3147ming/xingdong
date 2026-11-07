@@ -23,6 +23,49 @@ export const RUN_REWARDS = {
 export const BOT_HIRE = { coins: 300, reputation: 5 };
 
 /**
+ * 局内战地军需（闯关 / 无尽模式的波间商店）。
+ * 使用「局内金币」，结算后清空，不写入局外存档。
+ */
+export const FIELD = {
+  goldPerKill: 3,        // 普通击杀
+  goldElite: 12,         // 精英丧尸（重锤 / 嚎叫者）
+  goldBoss: 50,          // 首领
+  goldPerWave: 25,       // 每波肃清奖励
+  items: {
+    ammoRifle: {
+      name: '步枪弹补给', desc: '步枪备弹 +90', cost: 30,
+      kind: 'ammo', weapon: 'rifle', amount: 90,
+    },
+    ammoPistol: {
+      name: '手枪弹补给', desc: '手枪备弹 +60', cost: 18,
+      kind: 'ammo', weapon: 'pistol', amount: 60,
+    },
+    ammoShotgun: {
+      name: '霰弹补给', desc: '霰弹备弹 +30', cost: 28,
+      kind: 'ammo', weapon: 'shotgun', amount: 30,
+    },
+    ammoSniper: {
+      name: '狙击弹补给', desc: '狙击备弹 +12', cost: 42,
+      kind: 'ammo', weapon: 'sniper', amount: 12,
+    },
+    armor: {
+      name: '护甲板', desc: '护甲 +40', cost: 35,
+      kind: 'armor', amount: 40,
+    },
+    medkit: {
+      name: '医疗包', desc: '生命 +50', cost: 40,
+      kind: 'heal', amount: 50,
+    },
+    refill: {
+      name: '全额补给', desc: '补满备弹 / 护甲 / 生命', cost: 130,
+      kind: 'full',
+    },
+  },
+  order: ['ammoRifle', 'ammoPistol', 'ammoShotgun', 'ammoSniper', 'armor', 'medkit', 'refill'],
+};
+
+
+/**
  * 任务模板：progress 由存档累计战绩实时计算，不单独存进度。
  * metric: runs / kills / bestWave / bestLevel
  */

@@ -11,15 +11,15 @@
 export const CAMPAIGN_WAVES = [
   // total：本波总数；alive：同时存活上限；mix：变体配额
   {
-    total: 14, alive: 8, mix: { walker: 9, swift: 3, spitter: 2 },
+    total: 28, alive: 12, mix: { walker: 18, swift: 6, spitter: 4 },
     healthMul: 1.00, damageMul: 1.00, accuracyMul: 0.85, speedMul: 1.00,
   },
   {
-    total: 18, alive: 10, mix: { walker: 9, spitter: 3, swift: 3, bomber: 1, brute: 2 },
+    total: 36, alive: 16, mix: { walker: 18, spitter: 6, swift: 6, bomber: 2, brute: 4 },
     healthMul: 1.10, damageMul: 1.05, accuracyMul: 1.00, speedMul: 1.05,
   },
   {
-    total: 24, alive: 12, mix: { walker: 10, spitter: 3, brute: 3, swift: 4, bomber: 2, howler: 2 },
+    total: 48, alive: 20, mix: { walker: 20, spitter: 6, brute: 6, swift: 8, bomber: 4, howler: 4, runner: 4 },
     healthMul: 1.22, damageMul: 1.15, accuracyMul: 1.10, speedMul: 1.08,
   },
 ];
@@ -71,10 +71,29 @@ export const ENDLESS = {
   maxTotal: 24,           // 单波数量上限
   baseAlive: 4,           // 第 1 波同屏上限
   maxAlive: 8,            // 同屏上限
-  healthStep: 1.12,       // 每波血量复利
-  healthCap: 2.2,         // 血量倍率上限
-  bossEvery: 10,          // 每 N 波首领
+  healthStep: 1.10,       // 每波血量复利（放缓前期，拉长成长线）
+  healthCap: 3.6,         // 血量倍率上限（约第 14 波触顶）
+  bossEvery: 8,           // 每 N 波首领（提高首领核心产出）
 };
+
+/**
+ * 闯关每关的难度微调。
+ * 关卡越高，丧尸血量 / 伤害 / 速度略增；玩家靠局外成长去对冲。
+ */
+export function campaignWaves(levelIndex = 0) {
+  const k = Math.max(0, Math.floor(levelIndex));
+  const hp = 1 + 0.10 * k;
+  const dmg = 1 + 0.06 * k;
+  const spd = 1 + 0.02 * k;
+  const acc = 1 + 0.02 * k;
+  return CAMPAIGN_WAVES.map((w) => ({
+    ...w,
+    healthMul: w.healthMul * hp,
+    damageMul: w.damageMul * dmg,
+    speedMul: w.speedMul * spd,
+    accuracyMul: w.accuracyMul * acc,
+  }));
+}
 
 /** 守城模式参数 */
 export const DEFENSE = {
@@ -115,18 +134,20 @@ export function isDefenseMode(mode) {
   return mode === 'defense' || mode === 'defense_endless';
 }
 
-/** 守城第 n 波配置（n 从 1 开始） */
+/** 守城第 n 波配置（n 从 1 开始，难度持续攀升，无波次上限） */
 export function defenseWave(n) {
   const wave = Math.max(1, Math.floor(n));
-  const total = Math.min(DEFENSE.maxTotal, DEFENSE.baseTotal + DEFENSE.totalStep * (wave - 1));
-  const alive = Math.min(DEFENSE.maxAlive, DEFENSE.baseAlive + Math.floor((wave - 1) / 2));
-  const healthMul = Math.min(DEFENSE.healthCap, Math.pow(DEFENSE.healthStep, wave - 1));
+  const total = DEFENSE.baseTotal + DEFENSE.totalStep * (wave - 1);
+  const alive = DEFENSE.baseAlive + Math.floor((wave - 1) / 2);
+  const healthMul = Math.pow(DEFENSE.healthStep, wave - 1);
 
   const pool = ['swift'];
   if (wave >= 2) pool.push('spitter');
+  if (wave >= 3) pool.push('runner');
   if (wave >= 3) pool.push('bomber');
   if (wave >= 4) pool.push('howler');
-  if (wave >= 6) pool.push('brute');
+  if (wave >= 5) pool.push('brute');
+  if (wave >= 5) pool.push('fat');
 
   const extras = Math.min(total - 1, Math.floor(total * 0.6));
   const mix = { walker: total - extras };
@@ -141,21 +162,21 @@ export function defenseWave(n) {
     alive,
     mix,
     healthMul,
-    damageMul: Math.min(1.7, 1 + 0.06 * (wave - 1)),
-    accuracyMul: Math.min(1.3, 1 + 0.025 * (wave - 1)),
-    speedMul: Math.min(1.18, 1 + 0.012 * (wave - 1)),
+    damageMul: 1 + 0.06 * (wave - 1),
+    accuracyMul: 1 + 0.025 * (wave - 1),
+    speedMul: 1 + 0.012 * (wave - 1),
   };
 }
 
 /** 十轮守城的固定波次表 */
 export const DEFENSE_WAVES = Array.from({ length: DEFENSE.waves }, (_, i) => defenseWave(i + 1));
 
-/** 整局通用的平衡硬上限（P3 觉醒 / P4 机甲都会受这里约束） */
+/** 整局通用的平衡上限（全部无上限，成本持续递增，不再卡死成长） */
 export const BALANCE = {
-  maxDamageBonus: 0.60,     // 觉醒伤害加成上限 +60%
-  maxSpeedBonus: 0.25,      // 移速加成上限 +25%
-  maxHealthBonus: 40,       // 额外生命上限 +40
-  maxArmorBonus: 40,        // 额外护甲上限 +40
+  maxDamageBonus: Infinity,     // 觉醒伤害加成：无上限
+  maxSpeedBonus: Infinity,      // 移速加成：无上限
+  maxHealthBonus: Infinity,     // 额外生命：无上限
+  maxArmorBonus: Infinity,      // 额外护甲：无上限
 };
 
 /**
@@ -164,17 +185,19 @@ export const BALANCE = {
  */
 export function endlessWave(n) {
   const wave = Math.max(1, Math.floor(n));
-  const total = Math.min(ENDLESS.maxTotal, ENDLESS.baseTotal + ENDLESS.totalStep * (wave - 1));
-  const alive = Math.min(ENDLESS.maxAlive, ENDLESS.baseAlive + Math.floor((wave - 1) / 2));
-  const healthMul = Math.min(ENDLESS.healthCap, Math.pow(ENDLESS.healthStep, wave - 1));
+  const total = ENDLESS.baseTotal + ENDLESS.totalStep * (wave - 1);
+  const alive = ENDLESS.baseAlive + Math.floor((wave - 1) / 2);
+  const healthMul = Math.pow(ENDLESS.healthStep, wave - 1);
 
   // 变体池按波次逐步解锁
   const pool = [];
   pool.push('swift');            // 第 1 波起
   if (wave >= 2) pool.push('spitter');
+  if (wave >= 3) pool.push('runner');
   if (wave >= 3) pool.push('bomber');
   if (wave >= 4) pool.push('howler');
   if (wave >= 5) pool.push('brute');
+  if (wave >= 5) pool.push('fat');
 
   // 最多 55% 的名额分给特殊变体，剩下的都是普通丧尸
   const extras = Math.min(total - 1, Math.floor(total * 0.55));
@@ -193,9 +216,9 @@ export function endlessWave(n) {
     alive,
     mix,
     healthMul,
-    damageMul: Math.min(1.6, 1 + 0.05 * (wave - 1)),
-    accuracyMul: Math.min(1.25, 1 + 0.02 * (wave - 1)),
-    speedMul: Math.min(1.2, 1 + 0.01 * (wave - 1)),
+    damageMul: 1 + 0.05 * (wave - 1),
+    accuracyMul: 1 + 0.02 * (wave - 1),
+    speedMul: 1 + 0.01 * (wave - 1),
   };
 }
 

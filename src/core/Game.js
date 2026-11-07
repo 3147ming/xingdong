@@ -8,10 +8,10 @@
  *  - 死亡不再"按 R 复活"重开一局，而是进入结算面板，可再来一局或回主菜单
  */
 import * as THREE from 'three';
-import { WORLD, MATCH, WEAPON } from '../config/weapon.js';
-import { ENDLESS, DEFENSE, DEFENSE_WAVES, defenseWave, endlessWave, isDefenseMode, parseMode } from '../config/modes.js';
+import { WORLD, MATCH, WEAPON, WEAPON_UNLOCKED } from '../config/weapon.js';
+import { ENDLESS, DEFENSE, DEFENSE_WAVES, campaignWaves, defenseWave, endlessWave, isDefenseMode, parseMode } from '../config/modes.js';
 import { MAP_MATERIAL, MATERIALS } from '../config/progression.js';
-import { DEFENSE_LEVEL_INDEX } from '../world/levels.js';
+import { DEFENSE_LEVEL_INDEX, LEVELS } from '../world/levels.js';
 import { Input } from './Input.js';
 import { AssetManager } from './AssetManager.js';
 import { AudioManager } from './AudioManager.js';
@@ -21,6 +21,7 @@ import { computeAccuracy, computeScore, pickGrade } from './scoring.js';
 import { OutdoorMap } from '../world/OutdoorMap.js';
 import { LobbyScene } from '../world/LobbyScene.js';
 import { SupplyManager } from '../world/SupplyManager.js';
+import { ExplosionSystem } from '../world/ExplosionSystem.js';
 import { DefenseManager } from '../world/DefenseManager.js';
 import { MouseLook } from '../player/MouseLook.js';
 import { PlayerController } from '../player/PlayerController.js';
@@ -40,7 +41,7 @@ import { DefenseUI } from '../ui/DefenseUI.js';
 import { GrowthUI } from '../ui/GrowthUI.js';
 import { MechSystem } from '../player/MechSystem.js';
 import { growthTotals } from '../config/growth.js';
-import { MISSIONS, missionProgress } from '../config/economy.js';
+import { MISSIONS, missionProgress, FIELD } from '../config/economy.js';
 
 export class Game {
   constructor() {
@@ -49,6 +50,8 @@ export class Game {
     this.accentColor = 0xffb020;
     this._ammoWheelOpen = false;
     this.aiming = false;        // 右键开镜切换状态（toggle，非长按）
+    this.runGold = 0;           // 局内金币（闯关 / 无尽波间商店使用，结算清空）
+    this._fieldShop = false;    // 当前打开的是否为关卡间商店
     this.stats = this._emptyStats();
   }
 
@@ -86,6 +89,23 @@ export class Game {
     this.scene.background = new THREE.Color(WORLD.fogColor);
     this.scene.fog = new THREE.Fog(WORLD.fogColor, WORLD.fogNear, WORLD.fogFar);
 
+    // 基础环境光：避免背光面/武器模型渲染成纯黑影
+    const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+    this.scene.add(ambient);
+    // 主平行光：投射阴影，给模型带来体积感与立体感
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    dirLight.position.set(20, 40, 15);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.camera.left = -40;
+    dirLight.shadow.camera.right = 40;
+    dirLight.shadow.camera.top = 40;
+    dirLight.shadow.camera.bottom = -40;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 120;
+    dirLight.shadow.bias = -0.0005;
+    this.scene.add(dirLight);
+
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.03, 200);
     this.scene.add(this.camera);
 
@@ -95,6 +115,7 @@ export class Game {
       onResume: () => this.resumeGame(),
       onRestart: () => this.restart(),
       onMenu: () => this.backToMenu(),
+      onNextLevel: () => this.nextLevel(),
       onCloseLobby: () => this.closeLobbyPanel(),
     });
 
@@ -162,6 +183,17 @@ export class Game {
       onPlayerHit: (dmg) => { this.stats.damageTaken += dmg; },
     });
 
+    // 场景可爆炸物：油桶 / 汽车被子弹点燃后 2 秒爆炸，可连锁引爆
+    this.explosions = new ExplosionSystem({
+      scene: this.scene,
+      collision: this.collision,
+      audio: this.audio,
+      player: this.player,
+      enemies: this.enemies,
+      effects: this.effects,
+    });
+    this.explosions.setExplodables(this.map.explodables);
+
     this.gun = new GunSystem({
       camera: this.camera,
       player: this.player,
@@ -173,6 +205,7 @@ export class Game {
       collision: this.collision,
       enemies: this.enemies,
       hud: this.hud,
+      explosions: this.explosions,
       onKill: () => {},
       onShot: (info) => this._onShot(info),
     });
@@ -193,7 +226,7 @@ export class Game {
 
     // 守城模式：HUD / 波间商店 / 核心与场景武器
     this.defenseUI = new DefenseUI({
-      onBuy: (id) => this._buyDefenseItem(id),
+      onBuy: (id) => this._buyShopItem(id),
       onContinue: () => this._closeShop(),
     });
     this._setupDefense();
@@ -367,6 +400,12 @@ export class Game {
     this.stats.startedAt = performance.now();
     this.stats.wavesCleared = 0;
 
+    // 局内战地金币：每局从 0 开始，结算清空；守城用核心面板的金币行
+    this.runGold = 0;
+    this._fieldShop = false;
+    this.defenseUI.setRunGold(0);
+    this.defenseUI.setRunGoldVisible(!this.defense);
+
     this.hud.setVisible(true);
     this.hud.reset(this.enemies.infinite ? null : this.enemies.waves.length);
     this.hud.setKills(0);
@@ -400,6 +439,7 @@ export class Game {
     this.player.health.reset();
     this.enemies.startMatch();
     this.supplies.reset();
+    this.explosions.reset();
     if (this.defense) this.defense.resetRun();
     this._showTips();
     this._updateMissionObjective();
@@ -416,7 +456,8 @@ export class Game {
   _wavesForMode(mode) {
     if (isDefenseMode(mode)) return DEFENSE_WAVES.slice();
     if (mode === 'endless') return [endlessWave(1)];
-    return MATCH.waves;
+    // 闯关：关卡越高，丧尸血量 / 伤害 / 速度按关卡系数成长
+    return campaignWaves(this.levelIndex);
   }
 
   /**
@@ -435,6 +476,7 @@ export class Game {
 
     this.enemies.setNavigation(this.map.spawnPoints, this.map.waypoints);
     this.supplies.setPoints(this.map.level.supplyPoints);
+    this.explosions?.setExplodables(this.map.explodables);
     this.player.respawn(this.map.playerSpawn);
     this.mouseLook.yaw = this.map.level.startYaw != null ? this.map.level.startYaw : 0;
     this.mouseLook.pitch = 0;
@@ -460,7 +502,11 @@ export class Game {
       onCoreDestroyed: () => this._onCoreDestroyed(),
     }) : null;
     if (this.defense) this.defense.setUI(this.defenseUI);
-    if (this.defenseUI) this.defenseUI.setActive(!!this.defense);
+    if (this.defenseUI) {
+      this.defenseUI.setActive(!!this.defense);
+      // 守城用核心面板自带的金币行；其余模式显示独立战地金币条
+      this.defenseUI.setRunGoldVisible(!this.defense);
+    }
     if (this.defense) this.defense.resetRun();
   }
 
@@ -486,6 +532,7 @@ export class Game {
         this.defense = null;
       }
       if (this.defenseUI) this.defenseUI.setActive(!!this.defense);
+      if (this.defenseUI) this.defenseUI.setRunGoldVisible(!this.defense);
     }
     this.menu.lobby.setMode(mode);
   }
@@ -542,8 +589,15 @@ export class Game {
     else this.gun.applyAmmoStock(this.save.data.meta.ammoStock, this.save.researchTotals().ammoCapMul);
     this.stats = this._emptyStats();
     this.stats.startedAt = performance.now();
+    this.runGold = 0;
+    this._fieldShop = false;
+    if (this.defenseUI) {
+      this.defenseUI.setRunGold(0);
+      this.defenseUI.setRunGoldVisible(!this.defense);
+    }
     this.enemies.startMatch();
     this.supplies.reset();
+    this.explosions.reset();
     if (this.defense) this.defense.resetRun();
     if (this.defenseUI) {
       this.defenseUI.setActive(!!this.defense);
@@ -587,7 +641,9 @@ export class Game {
     if (this.defenseUI) {
       this.defenseUI.setActive(false);
       this.defenseUI.hideShop();
+      this.defenseUI.setRunGoldVisible(false);
     }
+    this._fieldShop = false;
     if (this.growthUI) this.growthUI.hide();
     this.mech?.reset();
     if (this.lobby) this.lobby.resetPlayer();
@@ -787,8 +843,16 @@ export class Game {
     this.stats.kills += 1;
     if (this.defense && this.state === 'playing') {
       this.defense.addGold(DEFENSE.goldPerKill);
+    } else {
+      this._addRunGold(FIELD.goldPerKill);
     }
     this._updateMissionObjective();
+  }
+
+  /** 局内战地金币（闯关 / 无尽） */
+  _addRunGold(n) {
+    this.runGold += Math.max(0, n);
+    if (this.defenseUI) this.defenseUI.setRunGold(this.runGold);
   }
 
   /**
@@ -797,6 +861,13 @@ export class Game {
    */
   _onEnemyDeath(enemy) {
     if (!this.save || this.state !== 'playing' || !enemy?.variant) return;
+    // 精英 / 首领额外局内金币（普通击杀的基数已在 _onKill 里发放）
+    if (!this.defense) {
+      if (enemy.variant.id === 'boss') this._addRunGold(FIELD.goldBoss);
+      else if (enemy.variant.id === 'brute' || enemy.variant.id === 'howler') {
+        this._addRunGold(FIELD.goldElite);
+      }
+    }
     const drop = (id, chance) => {
       if (Math.random() < chance) {
         this.save.addMaterial(id, 1);
@@ -848,15 +919,18 @@ export class Game {
       this.hud.showSupplyToast('战地军需', '按 TAB 打开商店补充火力');
       return;
     }
-    // 闯关 / 无尽：只给小量免费补给，弹药主要靠局外购买与掉落
+    // 闯关 / 无尽：小量免费补给 + 局内金币；军需商店改为 TAB 随时打开
     this.gun.addSupply(MATCH.waveClearAmmoSmall);
     this.player.health.addArmor(MATCH.waveClearArmor);
+    this._addRunGold(FIELD.goldPerWave);
+    this.hud.showSupplyToast('战地军需', '按 TAB 打开军需商店补充火力');
   }
 
   // ---------------- 守城商店（TAB 常驻） ----------------
   /** 守城模式下随时打开军需商店；关闭后继续当前战斗 */
   _openDefenseShop() {
     if (!this.defense || !this.defenseUI) return;
+    this._fieldShop = false;
     this.state = 'shop';
     this.input.enabled = false;
     this.input.releaseLock();
@@ -873,10 +947,16 @@ export class Game {
   _closeShop() {
     if (this.state !== 'shop') return;
     this.defenseUI.hideShop();
+    this._fieldShop = false;
     this.state = 'playing';
     this.input.enabled = true;
     this._ignoreBlurUntil = performance.now() + 800;
     this.input.requestLock();
+  }
+
+  _buyShopItem(id) {
+    if (this._fieldShop) this._buyFieldItem(id);
+    else this._buyDefenseItem(id);
   }
 
   _buyDefenseItem(id) {
@@ -884,6 +964,110 @@ export class Game {
     const res = this.defense.buy(id);
     this.defenseUI.updateShop(this.defense.getShopState(), res.message);
     if (!res.ok) this.hud.showSupplyToast('军需购买失败', res.message);
+  }
+
+  // ---------------- 关卡间商店（闯关 / 无尽） ----------------
+  /**
+   * 波次肃清后自动打开的战地军需商店。
+   * 复用 DefenseUI 的商店面板，商品与货币换成局内战地金币。
+   */
+  _openFieldShop() {
+    if (!this.defenseUI || this.defense || this.state !== 'playing') return;
+    this.state = 'shop';
+    this._fieldShop = true;
+    this.input.enabled = false;
+    this.input.releaseLock();
+    this.gun.setMouseDown(false);
+    this.gun.setAiming(false);
+    if (this._ammoWheelOpen) {
+      this._ammoWheelOpen = false;
+      this.gun.closeAmmoWheel();
+    }
+    this.defenseUI.setRunGold(this.runGold);
+    this.defenseUI.showShop(
+      { gold: this.runGold, items: this._fieldShopItems() },
+      this.enemies.waveIndex + 1,
+      '购买'
+    );
+    if (this.defenseUI.shopTitle) this.defenseUI.shopTitle.textContent = '战地军需';
+    if (this.defenseUI.shopKicker) this.defenseUI.shopKicker.textContent = 'FIELD SUPPLY';
+    if (this.defenseUI.shopContinue) this.defenseUI.shopContinue.textContent = '返回战斗';
+    this.defenseUI.shopSub.textContent = '战地军需 · 用局内金币随时补给（TAB 打开 / Esc 关闭）';
+  }
+
+  /** 局内商店商品列表（带可买状态与提示） */
+  _fieldShopItems() {
+    const h = this.player.health;
+    return FIELD.order.map((id) => {
+      const it = FIELD.items[id];
+      let disabled = false;
+      let tip = '局内补给';
+      if (it.kind === 'ammo') {
+        const cur = this.gun.reserveOf(it.weapon);
+        const cap = this.gun.reserveCap(it.weapon);
+        tip = `备弹 ${Math.round(cur)}/${cap}`;
+        if (cur >= cap) { disabled = true; tip = '备弹已满'; }
+      } else if (it.kind === 'armor') {
+        tip = `护甲 ${Math.round(h.armor)}/${Math.round(h.maxArmor)}`;
+        if (h.armor >= h.maxArmor - 0.01) { disabled = true; tip = '护甲已满'; }
+      } else if (it.kind === 'heal') {
+        tip = `生命 ${Math.round(h.health)}/${Math.round(h.maxHealth)}`;
+        if (h.health >= h.maxHealth - 0.01) { disabled = true; tip = '生命已满'; }
+      }
+      return {
+        id,
+        name: it.name,
+        desc: it.desc,
+        costLabel: `${it.cost} 金币`,
+        tip,
+        affordable: this.runGold >= it.cost,
+        disabled,
+      };
+    });
+  }
+
+  _buyFieldItem(id) {
+    const it = FIELD.items[id];
+    if (!it || !this.defenseUI) return;
+    if (this.runGold < it.cost) {
+      this.defenseUI.updateShop(
+        { gold: this.runGold, items: this._fieldShopItems() },
+        '局内金币不足'
+      );
+      return;
+    }
+    let applied = 0;
+    if (it.kind === 'ammo') {
+      applied = this.gun.addSupplyFor(it.weapon, it.amount);
+    } else if (it.kind === 'armor') {
+      const before = this.player.health.armor;
+      this.player.health.addArmor(it.amount);
+      applied = this.player.health.armor - before;
+    } else if (it.kind === 'heal') {
+      applied = this.player.health.heal(it.amount);
+    } else if (it.kind === 'full') {
+      for (const w of WEAPON_UNLOCKED) applied += this.gun.addSupplyFor(w, 9999);
+      const beforeArmor = this.player.health.armor;
+      this.player.health.addArmor(9999);
+      applied += this.player.health.armor - beforeArmor;
+      const beforeHp = this.player.health.health;
+      this.player.health.heal(9999);
+      applied += this.player.health.health - beforeHp;
+    }
+    if (applied <= 0) {
+      this.defenseUI.updateShop(
+        { gold: this.runGold, items: this._fieldShopItems() },
+        '该项已满，未扣除金币'
+      );
+      return;
+    }
+    this.runGold -= it.cost;
+    this.defenseUI.setRunGold(this.runGold);
+    this.defenseUI.updateShop(
+      { gold: this.runGold, items: this._fieldShopItems() },
+      `${it.name} 补给完成`
+    );
+    this.hud.showSupplyToast(it.name, it.desc);
   }
 
   // ---------------- 局内任务目标 ----------------
@@ -948,7 +1132,11 @@ export class Game {
     this.input.releaseLock();
     this.gun.setMouseDown(false);
     this.hud.setVisible(false);
-    if (this.defenseUI) this.defenseUI.hideShop();
+    if (this.defenseUI) {
+      this.defenseUI.hideShop();
+      this.defenseUI.setRunGoldVisible(false);
+    }
+    this._fieldShop = false;
     if (this.growthUI) this.growthUI.hide();
     this.mech?.reset();
     if (this.defense && this.defense.isMounted) this.defense.dismount();
@@ -1000,7 +1188,31 @@ export class Game {
       wavesCleared: s.wavesCleared,
       waveTotal: infinite ? null : this.enemies.waves.length,
       totalEnemies: this.enemies.waves.reduce((n, w) => n + w.total, 0),
+      // 闯关胜利且还有下一关：结算面板显示「进入下一关」
+      nextLevel: (this.mode === 'campaign' && win && this.levelIndex + 1 < LEVELS.length - 1)
+        ? this.levelIndex + 2
+        : null,
     };
+  }
+
+  /**
+   * 结算面板「进入下一关」：直接加载下一张地图并开始新一局。
+   * 局内战地金币清空，局外备弹库存保留（上一关剩下的备弹带过去）。
+   */
+  nextLevel() {
+    if (this.mode !== 'campaign' || this.state !== 'result') return;
+    const next = this.levelIndex + 1;
+    if (next >= LEVELS.length - 1) {
+      this.backToMenu();
+      return;
+    }
+    this.levelIndex = next;
+    // 刷新本关波次（关卡系数）后再换图开局
+    this._applyMode('campaign');
+    this._loadMap(next);
+    this.menu.hideAll();
+    this.restart();
+    this._showBanner(`第 ${next + 1} 关`, this.map.level?.name || '');
   }
 
   /** 屏幕中央的波次横幅（自动淡出） */
@@ -1153,10 +1365,12 @@ export class Game {
       if (input.consumeAction('backpack')) this._featureSoon('背包', '物资系统开发中');
       if (input.consumeAction('map')) this._featureSoon('地图', '战术地图开发中');
       if (input.consumeAction('panel')) {
-        // 守城模式：TAB = 常驻军需商店；其他模式：TAB = 成长面板
+        // TAB = 军需商店（守城 / 闯关 / 无尽通用，随时补给）
         if (this.defense) this._openDefenseShop();
-        else this._openGrowthPanel();
+        else this._openFieldShop();
       }
+      // V = 成长面板（机甲 / 天赋 / 觉醒）
+      if (input.consumeAction('growth')) this._openGrowthPanel();
       for (let i = 1; i <= 7; i++) {
         if (input.consumeAction('skill' + i)) this._featureSoon(`技能 ${i}`, '技能系统开发中');
       }
@@ -1197,6 +1411,9 @@ export class Game {
       // 敌人
       this.enemies.update(dt);
 
+      // 场景可爆炸物（油桶 / 汽车引信与连锁爆炸）
+      this.explosions.update(dt);
+
       // 机甲形态燃料 / 护盾 / 哨戒炮塔
       this.mech.update(dt);
 
@@ -1221,17 +1438,19 @@ export class Game {
       // 死亡判定
       if (this.player.dead && this.state === 'playing') this._endMatch(false);
     } else if (this.state === 'shop') {
-      // 波间商店：敌人与核心暂停推进，只保留场景演出
-      this.effects.update(dt);
-      this.casings.update(dt);
-      this.mouseLook.update(0);
-      if (this.input.consumeAction('pause')) this._closeShop();
-    } else if (this.state === 'panel') {
-      // 成长面板：战斗暂停，只保留场景演出；TAB / ESC 关闭
+      // 军需商店：敌人与核心暂停推进，只保留场景演出
       this.effects.update(dt);
       this.casings.update(dt);
       this.mouseLook.update(0);
       if (this.input.consumeAction('pause') || this.input.consumeAction('panel')) {
+        this._closeShop();
+      }
+    } else if (this.state === 'panel') {
+      // 成长面板：战斗暂停，只保留场景演出；V / ESC 关闭
+      this.effects.update(dt);
+      this.casings.update(dt);
+      this.mouseLook.update(0);
+      if (this.input.consumeAction('pause') || this.input.consumeAction('growth')) {
         this._closeGrowthPanel();
       }
     } else if (this.state === 'result') {

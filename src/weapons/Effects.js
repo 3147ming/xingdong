@@ -99,6 +99,44 @@ export class Effects {
       this.bloodPool.push({ sprite: s, life: 0, maxLife: 0.4, vx: 0, vy: 0, vz: 0 });
     }
 
+    // 浓烟粒子池（爆炸后上升扩散，半透明深灰）
+    const smokeTex = glowTexture([
+      [0, 'rgba(90,90,90,0.45)'],
+      [0.5, 'rgba(60,60,60,0.2)'],
+      [1, 'rgba(40,40,40,0)'],
+    ]);
+    this.smokePool = [];
+    for (let i = 0; i < 16; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: smokeTex, transparent: true, opacity: 0,
+        depthWrite: false,
+      });
+      const s = new THREE.Sprite(mat);
+      s.visible = false;
+      scene.add(s);
+      this.smokePool.push({ sprite: s, life: 0, maxLife: 3.0, vx: 0, vy: 0, vz: 0, baseScale: 1.0 });
+    }
+
+    // 地面焦黑贴花池（贴在地面，缓慢淡出）
+    const burnTex = glowTexture([
+      [0, 'rgba(30,25,20,0.6)'],
+      [0.5, 'rgba(60,45,35,0.35)'],
+      [1, 'rgba(90,70,55,0)'],
+    ]);
+    this.burnMarkPool = [];
+    const burnGeo = new THREE.PlaneGeometry(1, 1);
+    for (let i = 0; i < 12; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        map: burnTex, transparent: true, opacity: 0,
+        depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1,
+      });
+      const mesh = new THREE.Mesh(burnGeo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = true;
+      scene.add(mesh);
+      this.burnMarkPool.push({ mesh, life: 0, maxLife: 12.0 });
+    }
+
     // 枪口粒子池（短寿命、加法混合）
     this.muzzlePool = [];
     const muzzleTex = glowTexture([
@@ -153,6 +191,14 @@ export class Effects {
 
   _getDecal() {
     return this.decalPool.find((d) => d.life <= 0) || this.decalPool[0];
+  }
+
+  _getSmoke() {
+    return this.smokePool.find((s) => s.life <= 0) || this.smokePool[0];
+  }
+
+  _getBurnMark() {
+    return this.burnMarkPool.find((b) => b.life <= 0) || this.burnMarkPool[0];
   }
 
   /** 子弹曳光（起点 -> 终点；color 用于元素弹着色） */
@@ -274,6 +320,39 @@ export class Effects {
     }
   }
 
+  /** 爆炸后浓烟：向四周散开后缓慢上升扩散 */
+  spawnSmoke(center, radius = 5) {
+    for (let i = 0; i < 8; i++) {
+      const item = this._getSmoke();
+      const ang = Math.random() * Math.PI * 2;
+      const r = Math.random() * radius * 0.5;
+      item.sprite.position.set(
+        center.x + Math.cos(ang) * r,
+        center.y + 0.4 + Math.random() * 0.8,
+        center.z + Math.sin(ang) * r
+      );
+      item.sprite.scale.setScalar(item.baseScale * (0.9 + Math.random() * 0.8));
+      item.sprite.material.opacity = 0.55 + Math.random() * 0.25;
+      item.sprite.visible = true;
+      item.life = item.maxLife * (0.7 + Math.random() * 0.5);
+      const sp = 0.3 + Math.random() * 0.9;
+      item.vx = Math.cos(ang) * sp;
+      item.vy = 0.5 + Math.random() * 1.1;
+      item.vz = Math.sin(ang) * sp;
+    }
+  }
+
+  /** 地面焦黑贴花：贴地（y≈0.02）随机旋转，缓慢淡出 */
+  spawnBurnMark(center, radius = 4.5) {
+    const item = this._getBurnMark();
+    item.mesh.position.set(center.x, 0.022, center.z);
+    item.mesh.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2);
+    item.mesh.scale.setScalar(radius * 1.6 * (0.8 + Math.random() * 0.35));
+    item.mesh.material.opacity = 0.85;
+    item.mesh.visible = true;
+    item.life = item.maxLife;
+  }
+
   /** 每帧更新 */
   update(dt) {
     for (const t of this.tracerPool) {
@@ -327,6 +406,30 @@ export class Effects {
         // 最后 2 秒淡出
         d.mesh.material.opacity = Math.min(0.95, d.life / 2) ;
         if (d.life <= 0) d.mesh.visible = false;
+      }
+    }
+    for (const s of this.smokePool) {
+      if (s.life > 0) {
+        s.life -= dt;
+        const k = s.life / s.maxLife;
+        // 边升边扩散、边变淡
+        s.sprite.material.opacity = Math.min(0.7, k * 0.9);
+        s.sprite.scale.setScalar(s.sprite.scale.x + dt * 1.6);
+        s.sprite.position.x += s.vx * dt;
+        s.sprite.position.y += s.vy * dt;
+        s.sprite.position.z += s.vz * dt;
+        // 上升速度逐渐衰减
+        s.vy *= 1 - dt * 0.45;
+        s.vx *= 1 - dt * 0.6;
+        s.vz *= 1 - dt * 0.6;
+        if (s.life <= 0) s.sprite.visible = false;
+      }
+    }
+    for (const b of this.burnMarkPool) {
+      if (b.life > 0) {
+        b.life -= dt;
+        b.mesh.material.opacity = 0.85 * Math.min(1, b.life / 4);
+        if (b.life <= 0) b.mesh.visible = false;
       }
     }
   }
