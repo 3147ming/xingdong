@@ -34,6 +34,8 @@ export class PlayerController {
     this.isSlow = false;
     this.isSprinting = false;
     this.hitSlowTimer = 0;
+    // 受击僵直减免（Roguelike perk 写入，1 = 完全不受僵直影响）
+    this.hitSlowResist = 0;
     this.eyeHeight = PLAYER.eyeHeight;
     this.currentHeight = PLAYER.height;
     // 局外成长 / 机甲形态的速度倍率；护盾值（机甲形态吸收伤害）
@@ -87,7 +89,8 @@ export class PlayerController {
              : (slow ? PLAYER.slowSpeed : PLAYER.walkSpeed));
     if (this.hitSlowTimer > 0) {
       this.hitSlowTimer -= dt;
-      speed *= PLAYER.hitSlowFactor;
+      const resist = Math.max(0, Math.min(1, this.hitSlowResist || 0));
+      speed *= PLAYER.hitSlowFactor + (1 - PLAYER.hitSlowFactor) * resist;
     }
     speed *= this.speedMul;
 

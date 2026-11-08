@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { FBXLoader } from '../../vendor/three/loaders/FBXLoader.js';
 import { TGALoader } from '../../vendor/three/loaders/TGALoader.js';
+import { GLTFLoader } from '../../vendor/three/loaders/GLTFLoader.js';
 
 const TEX_DIR = './public/assets/textures/';
 const MODEL_DIR = './public/assets/models/';
@@ -18,6 +19,7 @@ export class AssetManager {
   constructor() {
     this.manager = new THREE.LoadingManager();
     this.fbx = new FBXLoader(this.manager);
+    this.gltf = new GLTFLoader(this.manager);
     this.tex = new THREE.TextureLoader(this.manager);
     this.tga = new TGALoader(this.manager);
     this.assets = {};
@@ -62,6 +64,19 @@ export class AssetManager {
     });
   }
 
+  _gltf(path) {
+    return new Promise((resolve, reject) => {
+      this.gltf.load(path, resolve, undefined, reject);
+    });
+  }
+
+  /** 从 gltf 中提取 scene（GLB 里主场景） */
+  _gltfScene(path) {
+    return new Promise((resolve, reject) => {
+      this.gltf.load(path, (gltf) => resolve(gltf.scene), undefined, reject);
+    });
+  }
+
   /** 第一人称武器：优先使用带手臂的 AK 模型，解析失败时回退到 Unity 示例武器 */
   async _loadWeapon() {
     try {
@@ -79,6 +94,10 @@ export class AssetManager {
   async loadAll(onProgress) {
     const tasks = [
       ['weaponModel', () => this._loadWeapon()],
+      ['weaponPistol', () => this._gltfScene(MODEL_DIR + 'weapons/pistol.glb')],
+      ['weaponShotgun', () => this._gltfScene(MODEL_DIR + 'weapons/shotgun.glb')],
+      ['weaponSniper', () => this._gltfScene(MODEL_DIR + 'weapons/sniper.glb')],
+      ['weaponSmg', () => this._gltfScene(MODEL_DIR + 'weapons/smg.glb')],
       ['zombieModel', () => this._fbx(MODEL_DIR + 'zombie.fbx')],
       ['animIdle', () => this._fbx(MODEL_DIR + 'anim/z_idle.fbx')],
       ['animWalk', () => this._fbx(MODEL_DIR + 'anim/z_walk.fbx')],
@@ -112,6 +131,13 @@ export class AssetManager {
 
     this.assets = {
       weaponModel: results.weaponModel,
+      // 4 个独立 GLB 武器模型（pistol/shotgun/sniper/smg）
+      weapons: {
+        pistol: results.weaponPistol,
+        shotgun: results.weaponShotgun,
+        sniper: results.weaponSniper,
+        smg: results.weaponSmg,
+      },
       zombieModel: results.zombieModel,
       anims: {
         idle: stripRootMotion(pickClip(results.animIdle)),

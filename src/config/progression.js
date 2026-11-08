@@ -44,6 +44,8 @@ export const AMMO_SHOP = {
   pistol: { weapon: 'pistol', name: '手枪弹', rounds: 30, price: 10, cap: 240 },
   shotgun: { weapon: 'shotgun', name: '霰弹', rounds: 18, price: 35, cap: 144 },
   sniper: { weapon: 'sniper', name: '狙击弹', rounds: 10, price: 55, cap: 80 },
+  smg: { weapon: 'smg', name: '冲锋枪弹', rounds: 40, price: 15, cap: 480 },
+  rpg: { weapon: 'rpg', name: '火箭弹', rounds: 1, price: 60, cap: 12 },
 };
 
 /** 材料采购：价格 = basePrice + priceStep × 已购次数（不限购） */

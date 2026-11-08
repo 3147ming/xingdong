@@ -48,6 +48,15 @@ export class ExplosionSystem {
     });
   }
 
+  /** 指定点周围的可爆炸物被点燃（火箭 / 手雷等外部爆炸源使用） */
+  igniteWithin(point, radius) {
+    for (let i = 0; i < this.explodables.length; i++) {
+      const o = this.explodables[i];
+      if (o.state !== 'idle') continue;
+      if (o.position.distanceTo(point) <= radius) this.ignite(i);
+    }
+  }
+
   /** 子弹命中爆炸物：按碰撞盒引用精确定位并点燃 */
   igniteByBox(box) {
     if (!box) return;
@@ -144,6 +153,7 @@ export class ExplosionSystem {
     // ---- 爆炸音效 ----
     if (this.audio) {
       const dist = this.player ? this.player.position.distanceTo(center) : 30;
+      if (this.audio.playSfx) this.audio.playSfx('boom');
       this.audio.play('fire2', {
         volume: this.audio.distanceVolume(dist) * 1.3,
         rate: 0.25 + Math.random() * 0.1,

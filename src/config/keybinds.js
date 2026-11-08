@@ -28,6 +28,9 @@ export const KEY_ACTIONS = [
   { id: 'weapon3', label: '切枪 3', group: '战斗', def: 'Digit3' },
   { id: 'weapon4', label: '切枪 4', group: '战斗', def: 'Digit4' },
   { id: 'weapon5', label: '切枪 5', group: '战斗', def: 'Digit5' },
+  { id: 'weapon6', label: '切枪 6', group: '战斗', def: 'Digit6' },
+  { id: 'grenade', label: '投掷手雷', group: '战斗', def: 'KeyG' },
+  { id: 'molotov', label: '投掷燃烧瓶', group: '战斗', def: 'KeyH' },
   { id: 'ammoWheel', label: '弹种轮盘', group: '战斗', def: 'ControlLeft+KeyR' },
 
   // ---- 交互 ----

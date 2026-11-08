@@ -258,10 +258,107 @@ html, body {
 #hitmarker.kill i { background: var(--accent-2); width: 10px; }
 /* 第三轮：爆头命中金色标记 */
 #hitmarker.head i { background: #ffd24a; box-shadow: 0 0 8px rgba(255, 200, 60, 0.95); }
-@keyframes hitPop {
-  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.6); }
-  40% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+/* 范围爆炸命中标记：更大更圆的环状 */
+#hitmarker.aoe { width: 48px; height: 48px; }
+#hitmarker.aoe i { width: 16px; height: 3px; background: #ff8a3a; box-shadow: 0 0 12px rgba(255, 138, 58, 0.95); }
+#hitmarker.aoe.show { animation: hitPopAoe 0.36s ease-out; }
+@keyframes hitPopAoe {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.3); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.4); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+/* 伤害数字（世界空间弹出） */
+.dmg-num {
+  position: absolute;
+  font-weight: 900;
+  font-size: 16px;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 6px currentColor;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  animation: dmgFloat 0.95s ease-out forwards;
+  z-index: 60;
+}
+.dmg-num.normal { color: #fff; }
+.dmg-num.crit   { color: #ffd24a; font-size: 20px; }
+.dmg-num.head   { color: #ff6a4a; font-size: 18px; animation: dmgFloatHead 0.95s ease-out forwards; }
+.dmg-num.aoe    { color: #ff8a3a; font-size: 22px; animation: dmgFloatAoe 0.95s ease-out forwards; }
+@keyframes dmgFloat {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.7); }
+  20% { opacity: 1; transform: translate(-50%, -80%) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -150%) scale(0.95); }
+}
+@keyframes dmgFloatHead {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.6) rotate(-6deg); }
+  25% { opacity: 1; transform: translate(-50%, -85%) scale(1.2) rotate(3deg); }
+  100% { opacity: 0; transform: translate(-50%, -150%) scale(0.9) rotate(-2deg); }
+}
+@keyframes dmgFloatAoe {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.5); }
+  30% { opacity: 1; transform: translate(-50%, -95%) scale(1.4); }
+  100% { opacity: 0; transform: translate(-50%, -160%) scale(1); }
+}
+
+/* 连击计数器（屏幕顶部中央） */
+.combo-pop {
+  position: fixed;
+  top: 12%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  font-weight: 900;
+  font-size: 32px;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9), 0 0 20px rgba(255, 100, 60, 0.75);
+  pointer-events: none;
+  z-index: 70;
+}
+.combo-pop.hidden { display: none; }
+.combo-pop.show { animation: comboPop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.combo-pop.big {
+  font-size: 52px;
+  color: #ffd24a;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9), 0 0 28px rgba(255, 210, 74, 0.9);
+}
+@keyframes comboPop {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
+  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+/* 低血量屏幕边框警告 */
+.lowhp-overlay {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 45;
+  box-shadow: inset 0 0 120px 30px rgba(220, 40, 40, 0.45);
+  animation: lowhpPulse 1.2s ease-in-out infinite;
+}
+@keyframes lowhpPulse {
+  0%, 100% { box-shadow: inset 0 0 100px 20px rgba(220, 40, 40, 0.30); }
+  50%      { box-shadow: inset 0 0 160px 50px rgba(255, 60, 40, 0.55); }
+}
+
+/* 小地图雷达 */
+.minimap-wrap {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 50;
+  width: 160px;
+  height: 160px;
+  border: 1px solid rgba(127, 207, 255, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 0 20px rgba(80, 160, 220, 0.25);
+  backdrop-filter: blur(2px);
+}
+.minimap-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* 受击暗角 */
@@ -1644,3 +1741,296 @@ html, body {
   font-size: 11px; color: var(--accent); opacity: 0; transition: opacity 0.2s ease;
 }
 .growth-tip.show { opacity: 1; }
+
+/* =========================== Roguelike Perk（波间三选一） =========================== */
+.perk-overlay {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 22px; padding: 24px;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(12, 18, 24, 0.72), rgba(3, 5, 8, 0.9) 78%);
+  backdrop-filter: blur(4px);
+}
+.perk-head { text-align: center; }
+.perk-title {
+  font-size: clamp(20px, 2.6vw, 30px);
+  letter-spacing: 0.14em;
+  color: #fff;
+  text-shadow: 0 0 26px rgba(255, 176, 32, 0.35);
+}
+.perk-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+.perk-cards { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+.perk-card {
+  width: min(240px, 27vw); min-height: 210px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 22px 18px 18px;
+  cursor: pointer; font: inherit; color: var(--text); text-align: center;
+  background: rgba(14, 20, 26, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 3px solid var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.perk-card:hover {
+  transform: translateY(-4px);
+  background: rgba(26, 34, 42, 0.96);
+  border-color: var(--border);
+}
+.perk-card.cat-survival { border-top-color: var(--hp); }
+.perk-card.cat-special { border-top-color: var(--armor); }
+.perk-icon {
+  width: 46px; height: 46px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--accent);
+  background: rgba(255, 176, 32, 0.14);
+  border: 1px solid rgba(255, 176, 32, 0.4);
+  border-radius: 50%;
+}
+.perk-card.cat-survival .perk-icon {
+  color: var(--hp); background: rgba(53, 208, 127, 0.12); border-color: rgba(53, 208, 127, 0.4);
+}
+.perk-card.cat-special .perk-icon {
+  color: var(--armor); background: rgba(74, 168, 255, 0.12); border-color: rgba(74, 168, 255, 0.4);
+}
+.perk-name { font-size: 15px; letter-spacing: 0.08em; color: #fff; }
+.perk-desc { flex: 1; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.perk-meta { font-size: 10px; letter-spacing: 0.18em; color: var(--accent); }
+.perk-card.cat-survival .perk-meta { color: var(--hp); }
+.perk-card.cat-special .perk-meta { color: var(--armor); }
+.perk-skip {
+  padding: 9px 22px;
+  font-size: 12px; letter-spacing: 0.15em;
+  color: var(--muted); background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 4px;
+  cursor: pointer;
+}
+.perk-skip:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }
+
+/* 右侧常驻：已选 perk 图标 + 层数 */
+.perk-badges {
+  position: fixed; right: 14px; top: 42%;
+  transform: translateY(-50%);
+  z-index: 11; pointer-events: none;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.perk-badge {
+  position: relative;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--accent);
+  background: rgba(8, 12, 16, 0.82);
+  border: 1px solid rgba(255, 176, 32, 0.4);
+  border-radius: 6px;
+}
+.perk-badge.cat-survival { color: var(--hp); border-color: rgba(53, 208, 127, 0.4); }
+.perk-badge.cat-special { color: var(--armor); border-color: rgba(74, 168, 255, 0.4); }
+.perk-badge b {
+  position: absolute; right: -6px; bottom: -6px;
+  min-width: 16px; padding: 0 3px;
+  font-size: 10px; line-height: 16px; text-align: center;
+  color: #0a0d10; background: var(--accent); border-radius: 8px;
+}
+.perk-badge.cat-survival b { background: var(--hp); }
+.perk-badge.cat-special b { background: var(--armor); }
+
+@media (max-width: 760px) {
+  .perk-card { width: min(200px, 30vw); min-height: 180px; padding: 16px 12px; }
+  .perk-icon { width: 38px; height: 38px; font-size: 18px; }
+  .perk-badges { right: 8px; }
+}
+
+/* =========================== 觉醒模式专属面板 =========================== */
+.awaken-overlay {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(20, 10, 35, 0.75) 0%, rgba(0, 0, 0, 0.92) 70%);
+  backdrop-filter: blur(3px);
+}
+.awaken-overlay.hidden { display: none; }
+.awaken-overlay.awaken-pop .awaken-wrap { animation: awaken-pop-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes awaken-pop-in {
+  from { opacity: 0; transform: scale(0.92) translateY(20px); filter: blur(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0);     filter: blur(0); }
+}
+.awaken-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 30% 40%, rgba(255, 74, 42, 0.08) 0, transparent 40%),
+    radial-gradient(circle at 70% 60%, rgba(170, 106, 255, 0.08) 0, transparent 40%),
+    radial-gradient(circle at 50% 30%, rgba(74, 255, 106, 0.05) 0, transparent 30%);
+  pointer-events: none;
+}
+.awaken-wrap {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 28px;
+  width: min(900px, 92vw);
+}
+.awaken-head { text-align: center; }
+.awaken-eyebrow {
+  font-size: 11px; letter-spacing: 0.6em; color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 8px;
+}
+.awaken-title {
+  font-size: 46px; font-weight: 800; letter-spacing: 0.15em;
+  background: linear-gradient(90deg, #ff4a2a 0%, #aa6aff 50%, #4aff6a 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 40px rgba(170, 106, 255, 0.35);
+}
+.awaken-sub { font-size: 12px; letter-spacing: 0.22em; color: rgba(255, 255, 255, 0.45); margin-top: 6px; }
+
+.awaken-routes {
+  display: flex; gap: 14px; width: 100%;
+}
+.awaken-route {
+  flex: 1;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 2px solid var(--route-color);
+  border-radius: 8px;
+}
+.awaken-route .ar-name {
+  font-size: 13px; letter-spacing: 0.2em; color: var(--route-color);
+  font-weight: 700; margin-bottom: 6px;
+}
+.awaken-route .ar-bar {
+  height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 2px; overflow: hidden; margin-bottom: 4px;
+}
+.awaken-route .ar-fill {
+  height: 100%; background: var(--route-color);
+  box-shadow: 0 0 8px var(--route-color);
+  transition: width 0.4s ease;
+}
+.awaken-route .ar-meta { font-size: 10px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.4); display: flex; justify-content: space-between; align-items: center; }
+.awaken-route .ar-form { color: var(--route-color); font-size: 14px; letter-spacing: 0; }
+
+.awaken-cards { display: flex; gap: 20px; width: 100%; justify-content: center; flex-wrap: wrap; }
+.awaken-card {
+  width: min(240px, 28vw); min-height: 200px;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 22px 18px 18px;
+  background: linear-gradient(180deg, rgba(30, 22, 40, 0.95) 0%, rgba(12, 8, 22, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 3px solid var(--route-color);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.18s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  position: relative; overflow: hidden;
+}
+.awaken-card::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at top, var(--route-color), transparent 65%);
+  opacity: 0.08;
+  pointer-events: none;
+}
+.awaken-card:hover {
+  transform: translateY(-6px) scale(1.02);
+  border-color: var(--route-color);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 24px color-mix(in srgb, var(--route-color) 35%, transparent);
+}
+.awaken-card .awaken-card-route {
+  font-size: 10px; letter-spacing: 0.3em; color: var(--route-color);
+  font-weight: 700; text-transform: uppercase;
+}
+.awaken-card .awaken-card-name {
+  font-size: 19px; font-weight: 800; letter-spacing: 0.08em; color: #fff;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--route-color) 40%, transparent);
+}
+.awaken-card .awaken-card-desc {
+  flex: 1; font-size: 12px; line-height: 1.8; color: rgba(255, 255, 255, 0.7);
+}
+.awaken-card .awaken-card-meta {
+  font-size: 10px; letter-spacing: 0.18em; color: var(--route-color); opacity: 0.8;
+}
+
+.awaken-skip {
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.5);
+  padding: 10px 28px; font-size: 11px; letter-spacing: 0.22em;
+  border-radius: 6px; cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.awaken-skip:hover { color: #fff; border-color: rgba(255, 255, 255, 0.5); }
+
+/* HUD 常驻觉醒形态徽章 */
+.awaken-badge {
+  position: fixed;
+  top: 80px; right: 18px;
+  z-index: 50;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  background: rgba(10, 8, 20, 0.75);
+  border: 1px solid var(--route-color);
+  border-radius: 20px;
+  backdrop-filter: blur(6px);
+  font-size: 12px; letter-spacing: 0.12em;
+  color: var(--route-color);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--route-color) 40%, transparent);
+  animation: awaken-badge-pulse 2.5s ease-in-out infinite;
+}
+.awaken-badge.hidden { display: none; }
+@keyframes awaken-badge-pulse {
+  0%, 100% { box-shadow: 0 0 14px color-mix(in srgb, var(--route-color) 30%, transparent); }
+  50%      { box-shadow: 0 0 28px color-mix(in srgb, var(--route-color) 60%, transparent); }
+}
+.awaken-badge .ab-icon { font-size: 16px; }
+.awaken-badge .ab-text { font-weight: 700; }
+.awaken-badge .ab-form {
+  font-size: 10px; padding: 2px 6px; border-radius: 8px;
+  background: color-mix(in srgb, var(--route-color) 25%, transparent);
+}
+
+@media (max-width: 800px) {
+  .awaken-title { font-size: 32px; }
+  .awaken-card { width: min(200px, 32vw); min-height: 180px; padding: 18px 12px; }
+  .awaken-badge { top: 70px; right: 10px; font-size: 10px; padding: 6px 10px; }
+}
+
+/* =========================== 投掷物 HUD（手雷 / 燃烧瓶） =========================== */
+.throw-hud {
+  position: absolute; left: 18px; bottom: 26px;
+  display: flex; flex-direction: column; gap: 6px;
+  width: 148px;
+}
+.throw-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 9px;
+  background: rgba(8, 12, 16, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+  font-size: 11px; color: var(--muted);
+  opacity: 0.88;
+}
+.throw-item b { font-family: Consolas, monospace; font-size: 11px; color: var(--text); }
+.throw-item span { flex: 1; letter-spacing: 1px; }
+.throw-item i { font-style: normal; font-family: Consolas, monospace; color: var(--text); }
+.throw-item.active {
+  border-left-color: var(--accent);
+  background: rgba(255, 176, 32, 0.14);
+  color: var(--accent);
+  opacity: 1;
+}
+.throw-item.active b, .throw-item.active i { color: var(--accent); }
+.throw-item.empty { opacity: 0.4; }
+.throw-charge {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+}
+.throw-charge i {
+  display: block; height: 100%; width: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+@media (max-width: 760px) {
+  .throw-hud { left: 10px; bottom: 18px; width: 124px; }
+}

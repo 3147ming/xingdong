@@ -44,7 +44,7 @@ export function defaultSave() {
       claimedMissions: [],
       // 局外备弹库存（按武器口径；闯关/无尽开局带入）
       // 新兵配发：够打第一局，之后需要采购或捡掉落
-      ammoStock: { rifle: 60, pistol: 30, shotgun: 18, sniper: 10 },
+      ammoStock: { rifle: 60, pistol: 30, shotgun: 18, sniper: 10, smg: 80, rpg: 2 },
       // 材料采购累计次数（价格递增）
       shopBuys: {},
     },
@@ -53,7 +53,7 @@ export function defaultSave() {
     progress: { level: 1, xp: 0, points: 0 },
     unlocks: {
       mechs: [],
-      weapons: ['rifle', 'pistol', 'shotgun', 'sniper'],
+      weapons: ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'rpg'],
       levels: 1,
       modSlots: [],
       attachments: [],

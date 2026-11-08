@@ -32,6 +32,22 @@ const { server, port } = await startServer(ROOT);
 const url = `http://127.0.0.1:${port}/${LEVEL ? `?level=${LEVEL}` : ''}`;
 const c = await openSession({ tag: 'probe', width: 1024, height: 576 });
 
+/** 波间三选一强化：点第一张卡继续战斗，返回卡牌数与所选 perk */
+const resolvePerk = async () => {
+  const shown = String(await c.evaluate('window.__game.state')) === 'perk';
+  if (!shown) return { cards: 0, id: null };
+  const picked = await c.evaluate(`(() => {
+    const btns = [...document.querySelectorAll('#perk-overlay .perk-card')];
+    const first = btns[0];
+    if (!first) return { cards: btns.length, id: null };
+    const id = first.dataset.perk;
+    first.click();
+    return { cards: btns.length, id };
+  })()`);
+  await c.frame(2);
+  return picked;
+};
+
 /** 清空当前波：刷一个杀一个，直到本波总人数打完 */
 const clearWave = async (keepShop = false) => {
   const n = await c.evaluate(`(() => {
@@ -60,7 +76,9 @@ const clearWave = async (keepShop = false) => {
       }
     })()`);
   }
-  return n;
+  // 波间 Roguelike 三选一：选第一张卡继续
+  const perk = await resolvePerk();
+  return { ...n, perk };
 };
 
 try {
@@ -618,6 +636,19 @@ try {
   const reserveBeforeWave = Number(await c.evaluate('window.__game.gun.reserve'));
   const w1 = await clearWave();
   rec('第 1 波按 total 刷满并清空', w1.killed === w1.total && w1.spawned >= w1.total, JSON.stringify(w1));
+  rec('波间弹出三选一强化并成功选择', w1.perk.cards === 3 && w1.perk.id !== null, JSON.stringify(w1.perk));
+  const perkRuntime = await c.evaluate(`(() => {
+    const g = window.__game;
+    return {
+      stacks: g.perks.stacks.size,
+      badges: document.querySelectorAll('#perk-badges .perk-badge').length,
+      state: g.state,
+      overlayHidden: document.getElementById('perk-overlay').classList.contains('hidden'),
+    };
+  })()`);
+  rec('强化写入运行时 / 侧边图标显示 / 面板已关闭',
+    perkRuntime.stacks === 1 && perkRuntime.badges === 1 && perkRuntime.state === 'playing' && perkRuntime.overlayHidden === true,
+    JSON.stringify(perkRuntime));
   await c.waitFor('window.__game.enemies.waveState === "break"', 15000);
   rec('清空后进入休整（break）', String(await c.evaluate('window.__game.enemies.waveState')) === 'break', String(await c.evaluate('window.__game.enemies.waveState')));
   rec('清波不再自动弹出商店（改为 TAB 随时打开）',
@@ -643,8 +674,8 @@ try {
       title: document.querySelector('#shop-panel h2').textContent,
     };
   })()`);
-  rec('TAB 打开战地军需商店（7 类补给）',
-    fieldShop.state === 'shop' && fieldShop.visible === true && fieldShop.items === 7 && fieldShop.title === '战地军需',
+  rec('TAB 打开战地军需商店（11 类补给/装置）',
+    fieldShop.state === 'shop' && fieldShop.visible === true && fieldShop.items === 11 && fieldShop.title === '战地军需',
     JSON.stringify(fieldShop));
   const fieldBuy = await c.evaluate(`(() => {
     const g = window.__game;

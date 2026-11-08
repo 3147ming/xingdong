@@ -60,8 +60,27 @@ export const FIELD = {
       name: '全额补给', desc: '补满备弹 / 护甲 / 生命', cost: 130,
       kind: 'full',
     },
+    trapMine: {
+      name: '阔剑地雷', desc: '敌人靠近即引爆，150 范围伤害', cost: 100,
+      kind: 'trap', trap: 'mine',
+    },
+    trapFlame: {
+      name: '火焰陷阱', desc: '敌人靠近时喷火，持续灼烧区域', cost: 150,
+      kind: 'trap', trap: 'flame',
+    },
+    trapShock: {
+      name: '电网', desc: '范围内敌人麻痹 2 秒', cost: 200,
+      kind: 'trap', trap: 'shock',
+    },
+    trapTurret: {
+      name: '自动炮塔', desc: '360° 自动索敌射击，伤害 20/发', cost: 500,
+      kind: 'trap', trap: 'turret',
+    },
   },
-  order: ['ammoRifle', 'ammoPistol', 'ammoShotgun', 'ammoSniper', 'armor', 'medkit', 'refill'],
+  order: [
+    'ammoRifle', 'ammoPistol', 'ammoShotgun', 'ammoSniper', 'armor', 'medkit', 'refill',
+    'trapMine', 'trapFlame', 'trapShock', 'trapTurret',
+  ],
 };
 
 

@@ -21,6 +21,8 @@ export class SupplyManager {
     this.playerHealth = opts.playerHealth;
     this.hud = opts.hud;
     this.audio = opts.audio;
+    // 物资箱随机投掷物补给（由 Game 注入 ThrowSystem）
+    this.onThrowable = opts.onThrowable || null;
     // 科研·后勤：掉落率倍率（1 = 基础）
     this.dropChanceMul = 1;
 
@@ -240,6 +242,10 @@ export class SupplyManager {
       else if (cfg.ammo === 0 && cfg.heal === 0) {
         return false;   // 满甲捡护甲板：不消耗
       }
+    }
+    if (cfg.throwable > 0 && this.onThrowable) {
+      this.onThrowable(cfg.throwable);
+      took = true;
     }
     if (!took) return false;
 

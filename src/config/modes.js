@@ -54,6 +54,14 @@ export const MODES = {
     waves: null,
     infinite: true,
   },
+  awakening: {
+    id: 'awakening',
+    name: '觉醒模式',
+    description: '每 3 波觉醒一次，累积路线强化触发形态解锁。波次曲线更激进。',
+    waves: null,
+    infinite: true,
+    awakening: true,
+  },
 };
 
 /** 默认模式（探针与 ?mode 缺省都走闯关，保证旧行为不变） */

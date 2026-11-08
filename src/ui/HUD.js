@@ -2,6 +2,7 @@
  * HUD 控制器：负责所有 DOM 数值与反馈更新
  */
 import { PLAYER, WEAPON, MATCH } from '../config/weapon.js';
+import { Minimap } from './Minimap.js';
 
 export class HUD {
   constructor() {
@@ -41,6 +42,26 @@ export class HUD {
     this.ammoWheel = $('ammo-wheel');
     this.scopeOverlay = $('scope-overlay');
     this._wheelItems = null;
+
+    // 连杀计数（屏幕中央偏上）
+    this.comboEl = document.createElement('div');
+    this.comboEl.className = 'combo-pop hidden';
+    this.root.appendChild(this.comboEl);
+
+    // 低血量边框警告（默认隐藏，Game.update 控制显隐）
+    this.lowhpOverlay = document.createElement('div');
+    this.lowhpOverlay.className = 'lowhp-overlay hidden';
+    this.root.appendChild(this.lowhpOverlay);
+
+    // 小地图雷达（右下角，固定 160×160）
+    const mmWrap = document.createElement('div');
+    mmWrap.className = 'minimap-wrap';
+    const mmCanvas = document.createElement('canvas');
+    mmCanvas.width = 160;
+    mmCanvas.height = 160;
+    mmWrap.appendChild(mmCanvas);
+    this.root.appendChild(mmWrap);
+    this.minimap = new Minimap({ canvas: mmCanvas });
 
     this._lastHealth = -1;
   }
@@ -181,12 +202,12 @@ export class HUD {
     this.crosshair.style.setProperty('--spread', px.toFixed(1) + 'px');
   }
 
-  /** 命中标记（第三轮：爆头使用金色标记） */
-  showHitmarker(kill = false, headshot = false) {
-    this.hitmarker.classList.remove('show');
-    this.hitmarker.classList.toggle('kill', !!kill);
-    this.hitmarker.classList.toggle('head', !!headshot);
-    // 强制重排以重新触发动画
+  /** 命中标记：普通 / 爆头 / 击杀 / 范围爆炸 (aoe) */
+  showHitmarker(kill = false, headshot = false, kind = null) {
+    this.hitmarker.classList.remove('show', 'aoe', 'head', 'kill');
+    if (kind === 'aoe') this.hitmarker.classList.add('aoe');
+    if (headshot) this.hitmarker.classList.add('head');
+    if (kill) this.hitmarker.classList.add('kill');
     void this.hitmarker.offsetWidth;
     this.hitmarker.classList.add('show');
   }
@@ -211,6 +232,38 @@ export class HUD {
     el.textContent = '-' + Math.round(amount);
     this.root.appendChild(el);
     setTimeout(() => el.remove(), 900);
+  }
+
+  /**
+   * 世界坐标伤害数字：普通白色 / 暴击黄色 / 爆头红色抖动 / 范围伤害橙色
+   * @param {number} sx 屏幕像素 x
+   * @param {number} sy 屏幕像素 y
+   * @param {number} amount 伤害值
+   * @param {'normal'|'crit'|'head'|'aoe'} kind
+   */
+  showDamageNumber(sx, sy, amount, kind = 'normal') {
+    if (!amount || amount <= 0) return;
+    const el = document.createElement('div');
+    el.className = `dmg-num ${kind}`;
+    el.textContent = Math.round(amount);
+    el.style.left = `${sx.toFixed(1)}px`;
+    el.style.top = `${sy.toFixed(1)}px`;
+    this.root.appendChild(el);
+    setTimeout(() => el.remove(), 950);
+  }
+
+  /** 连杀计数（2 连杀起显示，超过 2.5 秒无击杀自动消失） */
+  showCombo(n) {
+    if (!this.comboEl || n < 2) return;
+    this.comboEl.textContent = `${n} 连杀`;
+    this.comboEl.classList.remove('hidden', 'show');
+    void this.comboEl.offsetWidth;
+    this.comboEl.classList.add('show');
+    this.comboEl.classList.toggle('big', n >= 5);
+  }
+
+  hideCombo() {
+    if (this.comboEl) this.comboEl.classList.add('hidden');
   }
 
   /** 击杀播报 */

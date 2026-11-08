@@ -44,6 +44,8 @@ const WEAPON_ADS = {
   pistol: { fov: 58, sensMul: 0.7, spreadMul: 0.6 },
   shotgun: { fov: 62, sensMul: 0.75, spreadMul: 0.7 },
   sniper: { fov: 28, sensMul: 0.32, spreadMul: 0.25 },
+  smg: { fov: 60, sensMul: 0.7, spreadMul: 0.55 },
+  rpg: { fov: 66, sensMul: 0.8, spreadMul: 0.7 },
 };
 
 const ELEMENT_MUZZLES = [

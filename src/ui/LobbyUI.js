@@ -9,6 +9,7 @@ export class LobbyUI {
   constructor() {
     this.root = document.getElementById('menu');
     this.nav = document.getElementById('lobby-nav');
+    this.enterTestingBtn = document.getElementById('btn-enter-testing');
     this.pages = {
       battle: document.getElementById('tab-battle'),
       missions: document.getElementById('tab-missions'),
@@ -17,19 +18,13 @@ export class LobbyUI {
       armory: document.getElementById('tab-armory'),
       mech: document.getElementById('tab-mech'),
       talent: document.getElementById('tab-talent'),
-      stats: document.getElementById('tab-stats'),
+      testing: document.getElementById('tab-testing'),
       settings: document.getElementById('tab-settings'),
     };
 
     this.cores = document.getElementById('lobby-cores');
     this.coins = document.getElementById('lobby-coins');
     this.reputation = document.getElementById('lobby-rep');
-    this.stats = {
-      runs: document.getElementById('st-runs'),
-      kills: document.getElementById('st-kills'),
-      level: document.getElementById('st-level'),
-      wave: document.getElementById('st-wave'),
-    };
 
     this.activeTab = 'battle';
     this.mode = 'campaign';
@@ -38,6 +33,9 @@ export class LobbyUI {
     this.growth = null;
     this._bindNav();
     this._bindModes();
+    if (this.enterTestingBtn) {
+      this.enterTestingBtn.addEventListener('click', () => this.onEnterTesting?.());
+    }
   }
 
   _bindModes() {
@@ -59,6 +57,7 @@ export class LobbyUI {
         endless: '进入无尽',
         defense: '开始守城（十轮）',
         defense_endless: '无尽守城',
+        awakening: '进入觉醒模式',
       };
       this.startBtn.textContent = labels[id] || '开始闯关';
     }
@@ -99,13 +98,8 @@ export class LobbyUI {
     if (this.reputation) this.reputation.textContent = String(reputation);
   }
 
-  /** 战绩页数值（P0 先显示占位，P5 接存档） */
-  setStats({ runs = 0, kills = 0, level = 1, wave = 0 } = {}) {
-    if (this.stats.runs) this.stats.runs.textContent = String(runs);
-    if (this.stats.kills) this.stats.kills.textContent = String(kills);
-    if (this.stats.level) this.stats.level.textContent = String(level);
-    if (this.stats.wave) this.stats.wave.textContent = String(wave);
-  }
+  /** 战绩页数值（已废弃，测试房取代战绩页，保留空实现以兼容调用） */
+  setStats() {}
 
   // ---------------- 局外成长：机甲 / 天赋 / 属性 ----------------
   /**

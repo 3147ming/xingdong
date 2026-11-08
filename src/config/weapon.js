@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 全局数值配置（v0.3 丧尸生存改造）
  *
  * 与 v0.2 的差异：
@@ -48,6 +48,7 @@ export const PLAYER = {
 export const WEAPONS = {
   rifle: {
     id: 'rifle',
+    art: 'rifle',
     name: 'M4A1',
     tag: '突击步枪',
     magazineSize: 30,
@@ -77,12 +78,13 @@ export const WEAPONS = {
     view: {
       scale: 0.60,
       position: { x: 0.14, y: -0.13, z: -0.32 },
-      rotation: { x: 0.02, y: -Math.PI / 2 + 0.04, z: 0.0 },
+      rotation: { x: 0.02, y: Math.PI, z: 0.0 },
       offset: { x: 0, y: 0, z: 0.13 },
     },
   },
   pistol: {
     id: 'pistol',
+    art: 'pistol',
     name: 'M1911',
     tag: '手枪',
     magazineSize: 12,
@@ -112,12 +114,13 @@ export const WEAPONS = {
     view: {
       scale: 0.42,
       position: { x: 0.12, y: -0.12, z: -0.28 },
-      rotation: { x: 0.0, y: -Math.PI / 2 + 0.03, z: 0.0 },
+      rotation: { x: 0.0, y: Math.PI, z: 0.0 },
       offset: { x: 0, y: 0, z: 0.13 },
     },
   },
   shotgun: {
     id: 'shotgun',
+    art: 'shotgun',
     name: 'M870',
     tag: '霰弹枪',
     magazineSize: 6,
@@ -147,12 +150,13 @@ export const WEAPONS = {
     view: {
       scale: 0.66,
       position: { x: 0.17, y: -0.14, z: -0.34 },
-      rotation: { x: 0.04, y: -Math.PI / 2 + 0.05, z: 0.0 },
+      rotation: { x: 0.04, y: Math.PI, z: 0.0 },
       offset: { x: 0, y: 0, z: 0.13 },
     },
   },
   sniper: {
     id: 'sniper',
+    art: 'sniper',
     name: 'AWM',
     tag: '重狙击枪',
     magazineSize: 5,
@@ -183,8 +187,84 @@ export const WEAPONS = {
     view: {
       scale: 0.72,
       position: { x: 0.16, y: -0.13, z: -0.36 },
-      rotation: { x: 0.0, y: -Math.PI / 2 + 0.02, z: 0.0 },
+      rotation: { x: 0.0, y: Math.PI, z: 0.0 },
       offset: { x: 0, y: 0, z: 0.13 },
+    },
+  },
+  // 第五把：MP5 冲锋枪（近距离泼水，射速极快、散布大）
+  smg: {
+    id: 'smg',
+    art: 'smg',
+    name: 'MP5',
+    tag: '冲锋枪',
+    magazineSize: 40,
+    reserveAmmo: 200,
+    fireInterval: 0.0667,   // ≈ 900 RPM
+    reloadTime: 1.95,
+    damage: 15,
+    pellets: 1,
+    spread: 0.018,
+    headshotMultiplier: 1.8,
+    limbMultiplier: 0.5,
+    range: 60,
+    spreadBase: 0.014,
+    spreadMove: 0.026,
+    spreadPerShot: 0.005,
+    spreadMax: 0.075,
+    spreadRecover: 0.95,
+    recoilPitch: 0.0085,
+    recoilYaw: 0.0042,
+    recoilRecover: 11.0,
+    recoilRamp: 0.09,
+    recoilRampMax: 2.8,
+    shakePerShot: 0.0005,
+    shakeMax: 0.003,
+    reloadInsertRatio: 0.55,
+    auto: true,
+    view: {
+      scale: 0.52,
+      position: { x: 0.13, y: -0.12, z: -0.30 },
+      rotation: { x: 0.02, y: Math.PI, z: 0.0 },
+      offset: { x: 0, y: 0, z: 0.13 },
+    },
+  },
+  // 第六把：RPG-7 火箭筒（单发爆炸 AoE，换弹极慢）
+  rpg: {
+    id: 'rpg',
+    name: 'RPG-7',
+    tag: '火箭筒',
+    art: 'rpg',             // 使用几何体模型，而不是复用步枪 FBX
+    magazineSize: 1,
+    reserveAmmo: 4,
+    fireInterval: 1.6,
+    reloadTime: 3.4,
+    damage: 200,
+    pellets: 1,
+    spread: 0.0,
+    headshotMultiplier: 1.0,
+    limbMultiplier: 1.0,
+    range: 120,
+    explodeRadius: 5.5,     // 命中点范围爆炸
+    explodeDamage: 120,
+    spreadBase: 0.0,
+    spreadMove: 0.03,
+    spreadPerShot: 0.0,
+    spreadMax: 0.03,
+    spreadRecover: 1.0,
+    recoilPitch: 0.07,
+    recoilYaw: 0.025,
+    recoilRecover: 5.0,
+    recoilRamp: 0.0,
+    recoilRampMax: 1.0,
+    shakePerShot: 0.006,
+    shakeMax: 0.018,
+    reloadInsertRatio: 0.5,
+    auto: false,
+    view: {
+      scale: 0.9,
+      position: { x: 0.19, y: -0.16, z: -0.36 },
+      rotation: { x: 0.02, y: Math.PI, z: 0.0 },
+      offset: { x: 0, y: 0, z: 0.2 },
     },
   },
 };
@@ -193,10 +273,10 @@ export const WEAPONS = {
 export const WEAPON = WEAPONS.rifle;
 
 // 武器切换顺序
-export const WEAPON_ORDER = ['rifle', 'pistol', 'shotgun', 'sniper'];
+export const WEAPON_ORDER = ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'rpg'];
 
 // 初始携带的武器
-export const WEAPON_UNLOCKED = ['rifle', 'pistol', 'shotgun', 'sniper'];
+export const WEAPON_UNLOCKED = ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'rpg'];
 
 // ---------------- 丧尸（敌人） ----------------
 // 铁律：普通丧尸（walker / brute）只有近战，**没有任何枪械参数**。
@@ -427,7 +507,7 @@ export const SUPPLY = {
     ammoSmall: { label: '弹药包', hint: '+10 发备弹', ammo: 10, heal: 0,  armor: 0,  color: 0x5d8a45 },
     med:   { label: '医疗包', hint: '+45 生命',     ammo: 0,   heal: 45, armor: 0,  color: 0xb43a34 },
     armor: { label: '护甲板', hint: '+35 护甲',     ammo: 0,   heal: 0,  armor: 35, color: 0x3a5fb4 },
-    cache: { label: '物资箱', hint: '+60 弹药 +30 生命 +25 护甲', ammo: 60, heal: 30, armor: 25, color: 0xb8862e },
+    cache: { label: '物资箱', hint: '+60 弹药 +30 生命 +25 护甲 · 随机投掷物×1', ammo: 60, heal: 30, armor: 25, throwable: 1, color: 0xb8862e },
   },
   // 地图上的补给点位（露天货场坐标）
   points: [

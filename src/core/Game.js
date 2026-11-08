@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { WORLD, MATCH, WEAPON, WEAPON_UNLOCKED } from '../config/weapon.js';
 import { ENDLESS, DEFENSE, DEFENSE_WAVES, campaignWaves, defenseWave, endlessWave, isDefenseMode, parseMode } from '../config/modes.js';
+import { AWAKEN_EVERY, awakenWave } from '../config/awakening.js';
 import { MAP_MATERIAL, MATERIALS } from '../config/progression.js';
 import { DEFENSE_LEVEL_INDEX, LEVELS } from '../world/levels.js';
 import { Input } from './Input.js';
@@ -17,11 +18,17 @@ import { AssetManager } from './AssetManager.js';
 import { AudioManager } from './AudioManager.js';
 import { CollisionWorld } from './CollisionWorld.js';
 import { SaveManager } from './SaveManager.js';
+import { PerkSystem } from './PerkSystem.js';
+import { AwakeningSystem } from './AwakeningSystem.js';
+import { PostFX } from './PostFX.js';
+import { DayNightSystem } from './DayNightSystem.js';
 import { computeAccuracy, computeScore, pickGrade } from './scoring.js';
 import { OutdoorMap } from '../world/OutdoorMap.js';
 import { LobbyScene } from '../world/LobbyScene.js';
 import { SupplyManager } from '../world/SupplyManager.js';
 import { ExplosionSystem } from '../world/ExplosionSystem.js';
+import { ThrowSystem } from '../world/ThrowSystem.js';
+import { TrapSystem } from '../world/TrapSystem.js';
 import { DefenseManager } from '../world/DefenseManager.js';
 import { MouseLook } from '../player/MouseLook.js';
 import { PlayerController } from '../player/PlayerController.js';
@@ -39,6 +46,9 @@ import { ExchangeUI } from '../ui/ExchangeUI.js';
 import { ResearchUI } from '../ui/ResearchUI.js';
 import { DefenseUI } from '../ui/DefenseUI.js';
 import { GrowthUI } from '../ui/GrowthUI.js';
+import { PerkUI } from '../ui/PerkUI.js';
+import { AwakenUI } from '../ui/AwakenUI.js';
+import { ThrowUI } from '../ui/ThrowUI.js';
 import { MechSystem } from '../player/MechSystem.js';
 import { growthTotals } from '../config/growth.js';
 import { MISSIONS, missionProgress, FIELD } from '../config/economy.js';
@@ -52,6 +62,13 @@ export class Game {
     this.aiming = false;        // 右键开镜切换状态（toggle，非长按）
     this.runGold = 0;           // 局内金币（闯关 / 无尽波间商店使用，结算清空）
     this._fieldShop = false;    // 当前打开的是否为关卡间商店
+    this.perks = new PerkSystem();   // 局内 Roguelike 增益
+    this.awakening = new AwakeningSystem(); // 觉醒模式专属增益
+    this._perkSlowTimer = 0;         // 子弹时间剩余秒数
+    // 连击计数：2.5 秒内连续击杀累积，超时归零
+    this._comboCount = 0;
+    this._comboTimer = null;
+    this._comboLastTime = 0;
     this.stats = this._emptyStats();
   }
 
@@ -106,8 +123,31 @@ export class Game {
     dirLight.shadow.bias = -0.0005;
     this.scene.add(dirLight);
 
+    // 昼夜/天气系统：保留 const 声明不变，另外存实例引用供 update 动态调参
+    this._dnSun = dirLight;
+    this._dnAmbient = ambient;
+    this._dnState = {
+      time: 0.40,
+      dayLength: 240,
+      weather: 'clear',
+      nextWeatherAt: 45,
+      fogNear0: WORLD.fogNear,
+      fogFar0: WORLD.fogFar,
+    };
+    this.dayNight = new DayNightSystem({
+      state: this._dnState,
+      sun: this._dnSun,
+      amb: this._dnAmbient,
+      fog: this.scene.fog,
+      bg: this.scene.background,
+    });
+
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.03, 200);
     this.scene.add(this.camera);
+
+    // 轻量后期处理：Bloom 辉光 + 暗角 + 受击边缘闪红
+    this.postfx = new PostFX(this.renderer);
+    this._lastVital = null;
 
     // ---- 加载资源 ----
     this.menu = new Menu({
@@ -153,6 +193,15 @@ export class Game {
     this.player = new PlayerController(this.camera, this.input, this.collision, this.audio, this.map.playerSpawn);
 
     this.hud = new HUD();
+    // 波间三选一强化卡片（DOM 覆盖层 + 右侧已选图标）
+    this.perkUI = new PerkUI({
+      onPick: (id) => this._pickPerk(id),
+      onSkip: () => this._skipPerk(),
+    });
+    this.awakenUI = new AwakenUI({
+      onPick: (id) => this._pickAwaken(id),
+      onSkip: () => this._skipAwaken(),
+    });
     this.effects = new Effects(this.scene);
     this.casings = new CasingSystem(this.scene, this.audio);
     this.weaponView = new WeaponView(this.camera, this.assets);
@@ -210,6 +259,32 @@ export class Game {
       onShot: (info) => this._onShot(info),
     });
 
+    // 投掷物：手雷 / 燃烧瓶（按 G / H 进入投掷态，按住左键蓄力）
+    this.throwSystem = new ThrowSystem({
+      scene: this.scene,
+      collision: this.collision,
+      camera: this.camera,
+      player: this.player,
+      enemies: this.enemies,
+      effects: this.effects,
+      audio: this.audio,
+      explosions: this.explosions,
+    });
+    this.throwUI = new ThrowUI();
+
+    // 陷阱与炮塔：波间商店购买蓝图 → 按 F 放置
+    this.trapSystem = new TrapSystem({
+      scene: this.scene,
+      collision: this.collision,
+      camera: this.camera,
+      player: this.player,
+      enemies: this.enemies,
+      effects: this.effects,
+      audio: this.audio,
+      explosions: this.explosions,
+      hud: this.hud,
+    });
+
     // 补给点系统（弹药 / 医疗 / 护甲 / 综合物资）
     this.supplies = new SupplyManager({
       scene: this.scene,
@@ -218,6 +293,10 @@ export class Game {
       playerHealth: this.player.health,
       hud: this.hud,
       audio: this.audio,
+      onThrowable: () => {
+        const kind = this.throwSystem.grantCache();
+        this.hud.showSupplyToast('获得投掷物', kind === 'frag' ? '手雷 +1' : '燃烧瓶 +1');
+      },
     });
     this.supplies.setAutoPickup(this.save.data.settings.autoPickup);
     this.supplies.setPoints(this.map.level.supplyPoints);
@@ -355,6 +434,7 @@ export class Game {
 
     // 首次进入大厅：需要一次点击手势才能锁定鼠标
     this.enterLobby(true);
+    this.menu.lobby.onEnterTesting = () => this.startGame('testing');
 
     // 启动循环
     this.clock.start();
@@ -391,10 +471,32 @@ export class Game {
   }
 
   // ---------------- 状态切换 ----------------
-  /** @param {'campaign'|'endless'} [mode] 大厅选择的作战模式 */
+  /** @param {'campaign'|'endless'|'testing'} [mode] 大厅选择的作战模式 */
   startGame(mode) {
     if (mode && mode !== this.mode) this._applyMode(mode);
+    if (mode === 'testing') {
+      // 测试房：加载地图，不开始战斗、不刷怪、不重置生命，供枪械手感测试
+      this.state = 'playing';
+      this.hud.setVisible(true);
+      this.menu.hideAll();
+      this.menu.hideLobbyPanel();
+      if (this.lobbyHud) this.lobbyHud.classList.add('hidden');
+      this._hideLobbyEntry();
+      this.input.enabled = true;
+      this.mouseLook.reset();
+      this.input.consumeMouseDelta();
+      this._enterFullscreen();
+      this._ignoreBlurUntil = performance.now() + 800;
+      this.input.requestLock();
+      this.gun.applyLoadout(this.save.data.loadout);
+      this.player.respawn(this.map.playerSpawn);
+      this.player.health.reset();
+      this._showTips();
+      return;
+    }
     this.audio.resume();
+    this.audio.startBattleMusic();
+    this.audio.startAmbience();
     this.state = 'playing';
     this.stats = this._emptyStats();
     this.stats.startedAt = performance.now();
@@ -433,6 +535,16 @@ export class Game {
       this.gun.applyAmmoStock(this.save.data.meta.ammoStock, this.save.researchTotals().ammoCapMul);
     }
     // 应用局外成长（属性点 / 天赋）后再复活，生命上限才是最新值
+    this.perks.reset();
+    this.perkUI.reset();
+    this.awakening.reset();
+    this.awakenUI.reset();
+    this._perkSlowTimer = 0;
+    // 重置连击
+    this._comboCount = 0;
+    clearTimeout(this._comboTimer);
+    this._comboTimer = null;
+    this._comboLastTime = 0;
     this._applyGrowth();
     this.mech?.reset();
     this.player.respawn(this.map.playerSpawn);
@@ -440,15 +552,19 @@ export class Game {
     this.enemies.startMatch();
     this.supplies.reset();
     this.explosions.reset();
+    this.throwSystem.reset();
+    this.trapSystem.reset();
+    this._lastVital = null;
     if (this.defense) this.defense.resetRun();
     this._showTips();
     this._updateMissionObjective();
   }
 
   // ---------------- 模式 / 地图 ----------------
-  /** 当前模式对应的地图索引（守城固定用领地防线） */
+  /** 当前模式对应的地图索引（守城固定用领地防线，测试房用主图） */
   _mapIndexForMode(mode) {
     if (isDefenseMode(mode)) return DEFENSE_LEVEL_INDEX;
+    if (mode === 'testing') return 0;
     return mode === 'campaign' ? this.levelIndex : 0;
   }
 
@@ -456,6 +572,7 @@ export class Game {
   _wavesForMode(mode) {
     if (isDefenseMode(mode)) return DEFENSE_WAVES.slice();
     if (mode === 'endless') return [endlessWave(1)];
+    if (mode === 'awakening') return [awakenWave(1)];
     // 闯关：关卡越高，丧尸血量 / 伤害 / 速度按关卡系数成长
     return campaignWaves(this.levelIndex);
   }
@@ -477,6 +594,7 @@ export class Game {
     this.enemies.setNavigation(this.map.spawnPoints, this.map.waypoints);
     this.supplies.setPoints(this.map.level.supplyPoints);
     this.explosions?.setExplodables(this.map.explodables);
+    this.trapSystem?.reset();
     this.player.respawn(this.map.playerSpawn);
     this.mouseLook.yaw = this.map.level.startYaw != null ? this.map.level.startYaw : 0;
     this.mouseLook.pitch = 0;
@@ -517,14 +635,16 @@ export class Game {
     if (mapChanged) this._loadMap(this._mapIndexForMode(mode));
 
     const defense = isDefenseMode(mode);
-    this.enemies.applyMode({
-      mode,
-      infinite: mode === 'endless' || mode === 'defense_endless',
-      waveGen: mode === 'endless' ? endlessWave : (mode === 'defense_endless' ? defenseWave : null),
-      waves: this._wavesForMode(mode),
-      breakTime: defense ? DEFENSE.breakSec : MATCH.breakTime,
-      spawnGap: defense ? DEFENSE.spawnGap : MATCH.spawnGap,
-    });
+    if (mode !== 'testing') {
+      this.enemies.applyMode({
+        mode,
+        infinite: mode === 'endless' || mode === 'defense_endless' || mode === 'awakening',
+        waveGen: mode === 'endless' ? endlessWave : (mode === 'defense_endless' ? defenseWave : (mode === 'awakening' ? awakenWave : null)),
+        waves: this._wavesForMode(mode),
+        breakTime: defense ? DEFENSE.breakSec : MATCH.breakTime,
+        spawnGap: defense ? DEFENSE.spawnGap : MATCH.spawnGap,
+      });
+    }
     if (!mapChanged) {
       // 从守城切回普通模式时，把守城对象与 HUD 收起
       if (this.defense && !defense) {
@@ -556,6 +676,7 @@ export class Game {
   pauseGame() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
+    this.throwSystem.cancel();
     this._pauseGuard = 0.35;   // 防止 Esc 解锁指针时被同一帧立刻"继续"
     if (this._ammoWheelOpen) {
       this._ammoWheelOpen = false;
@@ -580,6 +701,16 @@ export class Game {
 
   /** 暂停面板"重新开始" / 结算面板"再来一局" */
   restart() {
+    this.perks.reset();
+    this.perkUI.reset();
+    this.awakening.reset();
+    this.awakenUI.reset();
+    this._perkSlowTimer = 0;
+    // 重置连击
+    this._comboCount = 0;
+    clearTimeout(this._comboTimer);
+    this._comboTimer = null;
+    this._comboLastTime = 0;
     this._applyGrowth();
     this.mech?.reset();
     this.player.respawn(this.map.playerSpawn);
@@ -598,6 +729,8 @@ export class Game {
     this.enemies.startMatch();
     this.supplies.reset();
     this.explosions.reset();
+    this.throwSystem.reset();
+    this.trapSystem.reset();
     if (this.defense) this.defense.resetRun();
     if (this.defenseUI) {
       this.defenseUI.setActive(!!this.defense);
@@ -632,6 +765,10 @@ export class Game {
    */
   enterLobby(firstEntry = false) {
     this.state = 'lobby';
+    this.perkUI.reset();
+    this.throwSystem.cancel();
+    this.audio.stopAmbience();
+    this.audio.startLobbyMusic();
     this.input.enabled = true;
     this.input.releaseLock();
     this._exitFullscreen();
@@ -775,20 +912,49 @@ export class Game {
       on ? '靠近补给箱自动拾取' : '按 F 手动拾取');
   }
 
-  /** 应用局外成长（属性点 + 天赋 + 科研）到玩家与枪械 */
+  /** 应用局外成长（属性点 + 天赋 + 科研 + 局内 perk + 觉醒）到玩家与枪械 */
   _applyGrowth() {
     const t = growthTotals(this.save.data);
     const r = this.save.researchTotals();
-    this.player.health.setBonus(t.maxHpBonus + r.hpBonus, t.maxArmorBonus + r.armorBonus);
-    this.player.speedMul = t.speedMul;
-    this.gun.damageMul = t.dmgMul * r.dmgMul;
-    this.gun.fireRateMul = t.fireRateMul;
+    const p = this.perks.mods;
+    const a = this.mode === 'awakening' ? this.awakening.buildMods() : {};
+    // 合并 perk + 觉醒（同类字段累加）
+    const hpAdd = (p.hpAdd || 0) + (a.hpAdd || 0);
+    const armorAdd = (p.armorAdd || 0) + (a.armorAdd || 0);
+    const dmgAdd = (p.dmgAdd || 0) + (a.dmgAdd || 0);
+    const fireRateAdd = (p.fireRateAdd || 0) + (a.fireRateAdd || 0);
+    const speedAdd = (p.speedAdd || 0) + (a.speedAdd || 0);
+    const slowResist = Math.min(1, (p.slowResist || 0) + (a.slowResist || 0));
+    const critAdd = (p.critAdd || 0) + (a.critAdd || 0);
+    // critMul 取最高
+    const critMul = Math.max(p.critMul || 1.6, a.critMul || 1.6);
+    // reloadCut（觉醒专属）
+    const reloadCut = (a.reloadCut || 0);
+    this.player.health.setBonus(
+      t.maxHpBonus + r.hpBonus + hpAdd,
+      t.maxArmorBonus + r.armorBonus + armorAdd
+    );
+    this.player.speedMul = t.speedMul * (1 + speedAdd);
+    this.player.hitSlowResist = slowResist;
+    this.gun.damageMul = t.dmgMul * r.dmgMul * (1 + dmgAdd);
+    this.gun.fireRateMul = t.fireRateMul * (1 + fireRateAdd);
     // 科研：换弹变快、暴击、爆头与首领伤害
-    this.gun.reloadMul = Math.max(0.45, t.reloadMul - r.reloadCut);
-    this.gun.critChance = r.critChance;
-    this.gun.critMul = 1.6;
+    this.gun.reloadMul = Math.max(0.45, t.reloadMul - r.reloadCut - reloadCut);
+    this.gun.critChance = Math.min(1, r.critChance + critAdd);
+    this.gun.critMul = critAdd > 0 ? critMul : 1.6;
     this.gun.headshotMulBonus = r.headshotMul;
     this.gun.bossMul = r.bossMul;
+    // perk：弹匣容量 / 穿透 / 双重射击 / 爆裂 / 弹射（合并觉醒）
+    const mergedMods = {
+      ...p,
+      pierceAdd: (p.pierceAdd || 0) + (a.pierceAdd || 0),
+      explodeRadius: Math.max(p.explodeRadius || 0, a.explodeRadius || 0),
+      explodeDamage: (p.explodeDamage || 0) + (a.explodeDamage || 0),
+      extraPellets: (p.extraPellets || 0) + (a.extraPellets || 0),
+      bounceAdd: (p.bounceAdd || 0) + (a.bounceAdd || 0),
+      slowMoAdd: (p.slowMoAdd || 0) + (a.slowMoAdd || 0),
+    };
+    this.gun.applyPerkMods(mergedMods);
     if (this.supplies) this.supplies.dropChanceMul = r.dropChanceMul;
   }
 
@@ -821,6 +987,16 @@ export class Game {
     this.hud.showSupplyToast(label, hint);
   }
 
+  /** G / H：切换手雷 / 燃烧瓶投掷态 */
+  _toggleThrow(kind) {
+    const res = this.throwSystem.toggleMode(kind);
+    if (!res.ok) {
+      this.hud.showSupplyToast('投掷物不足', res.message);
+      return;
+    }
+    this.hud.showSupplyToast(res.mode ? '投掷准备' : '取消投掷', res.message);
+  }
+
   /** 指针锁定状态变化 */
   _onLockChange(locked) {
     if (!locked && this.state === 'playing') this.pauseGame();
@@ -832,6 +1008,15 @@ export class Game {
     if (this.lobby) this.lobby.resize();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    // 同步视口尺寸到 GunSystem，用于伤害数字屏幕坐标计算
+    if (this.gun) {
+      this.gun._viewportWidth = window.innerWidth;
+      this.gun._viewportHeight = window.innerHeight;
+    }
+    if (this.postfx) {
+      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      this.postfx.setSize(size.x, size.y);
+    }
   }
 
   // ---------------- 波次 / 结算 ----------------
@@ -841,6 +1026,34 @@ export class Game {
    */
   _onKill() {
     this.stats.kills += 1;
+    // Perk「嗜血」/ 觉醒「战场再生」：每次击杀回血
+    const perkHeal = this.perks.mods.killHeal || 0;
+    const awakenMods = this.mode === 'awakening' ? this.awakening.buildMods() : {};
+    const awakenHeal = awakenMods.killHeal || 0;
+    const totalHeal = perkHeal + awakenHeal;
+    if (totalHeal > 0) this.player.health.heal(totalHeal);
+    // 连击计数
+    const now = performance.now();
+    if (now - this._comboLastTime < 2500) {
+      this._comboCount += 1;
+    } else {
+      this._comboCount = 1;
+    }
+    this._comboLastTime = now;
+    clearTimeout(this._comboTimer);
+    this._comboTimer = setTimeout(() => {
+      this._comboCount = 0;
+      this.hud?.hideCombo?.();
+    }, 2500);
+    if (this._comboCount >= 2) {
+      this.hud?.showCombo?.(this._comboCount);
+      // 连击音效（3 / 5 / 10 连杀有特殊音调）
+      if (this._comboCount === 3 || this._comboCount === 5 || this._comboCount === 10) {
+        this.audio?.playSfx?.('chime');
+      }
+    } else {
+      this.hud?.hideCombo?.();
+    }
     if (this.defense && this.state === 'playing') {
       this.defense.addGold(DEFENSE.goldPerKill);
     } else {
@@ -872,6 +1085,7 @@ export class Game {
       if (Math.random() < chance) {
         this.save.addMaterial(id, 1);
         this.hud.showSupplyToast(`获得 ${MATERIALS[id].name}`, '已存入局外仓库');
+        this.audio.playSfx('pickup');
       }
     };
     if (enemy.variant.id === 'boss') {
@@ -879,6 +1093,7 @@ export class Game {
       this.save.addMaterial('mecha', 1);
       this.save.addMaterial('awaken', 2);
       this.hud.showSupplyToast('首领战利品', '首领核心 +1 · 机甲材料 +1 · 觉醒材料 +2');
+      this.audio.playSfx('pickup');
     } else if (enemy.variant.id === 'brute' || enemy.variant.id === 'howler') {
       drop('awaken', 0.06);
     }
@@ -891,6 +1106,8 @@ export class Game {
 
   /** 每一发子弹都记一次，用于算命中率与爆头数 */
   _onShot(info) {
+    // perk「子弹时间」：开枪后短暂减缓周围时间
+    if (this.perks.mods.slowMoAdd > 0) this._perkSlowTimer = 1.2;
     this.stats.shots += 1;
     if (info && info.hit) this.stats.hits += 1;
     if (info && info.kill && info.headshot) this.stats.headshots += 1;
@@ -900,9 +1117,14 @@ export class Game {
     const cfg = this.enemies.waves[index];
     this.hud.setWave(index + 1, this.enemies.infinite ? null : this.enemies.waves.length, total);
     this.hud.setEnemies(total);
+    let banner = '';
+    if (this.mode === 'awakening') banner = `觉醒模式 · 第 ${index + 1} 波`;
+    else if (this.mode === 'defense') banner = `守城第 ${index + 1} 波`;
+    else if (this.enemies.infinite) banner = `无尽第 ${index + 1} 波`;
+    else banner = `第 ${index + 1} 波尸潮`;
     this._showBanner(
-      this.mode === 'defense' ? `守城第 ${index + 1} 波` : (this.enemies.infinite ? `无尽第 ${index + 1} 波` : `第 ${index + 1} 波尸潮`),
-      `丧尸 ${total} 只 · 同时最多 ${cfg.alive} 只在场`
+      banner,
+      `丧尸 ${total} 只 · 同时最多 ${cfg.alive} 只在场${this.mode === 'awakening' ? ` · 每 ${AWAKEN_EVERY} 波觉醒一次` : ''}`
     );
     this._updateMissionObjective();
   }
@@ -917,6 +1139,7 @@ export class Game {
       this.gun.addSupply(MATCH.waveClearAmmo);
       this.player.health.addArmor(MATCH.waveClearArmor);
       this.hud.showSupplyToast('战地军需', '按 TAB 打开商店补充火力');
+      this._offerPerk();
       return;
     }
     // 闯关 / 无尽：小量免费补给 + 局内金币；军需商店改为 TAB 随时打开
@@ -924,6 +1147,136 @@ export class Game {
     this.player.health.addArmor(MATCH.waveClearArmor);
     this._addRunGold(FIELD.goldPerWave);
     this.hud.showSupplyToast('战地军需', '按 TAB 打开军需商店补充火力');
+    this._offerPerk();
+  }
+
+  // ---------------- 波间 Roguelike 强化 ----------------
+  /** 弹出三选一强化卡片（暂停战斗，选完继续休整） */
+  _offerPerk() {
+    if (this.state !== 'playing') return;
+    const options = this.perks.roll(3);
+    if (options.length === 0) return;
+    this.state = 'perk';
+    this.input.enabled = false;
+    this.input.releaseLock();
+    this.gun.setMouseDown(false);
+    this.gun.setAiming(false);
+    if (this._ammoWheelOpen) {
+      this._ammoWheelOpen = false;
+      this.gun.closeAmmoWheel();
+    }
+    this.perkUI.show(options, this.perks);
+  }
+
+  /** 选中一项强化：立即套用数值并恢复战斗 */
+  _pickPerk(id) {
+    if (this.state !== 'perk') return;
+    const hpBefore = this.player.health.maxHealth;
+    const armorBefore = this.player.health.maxArmor;
+    const def = this.perks.pick(id);
+    this.perkUI.hide();
+    if (def) {
+      this._applyGrowth();
+      // 新增的生命 / 护甲上限立即补满对应数值
+      const hpGain = this.player.health.maxHealth - hpBefore;
+      const armorGain = this.player.health.maxArmor - armorBefore;
+      if (hpGain > 0) this.player.health.heal(hpGain);
+      if (armorGain > 0) this.player.health.addArmor(armorGain);
+      this.perkUI.renderBadges(this.perks);
+      this.hud.showSupplyToast(`强化 · ${def.name}`, def.desc);
+      this.audio.playSfx('chime');
+    }
+    this._resumeFromPerk();
+  }
+
+  /** 跳过本次强化（防止卡在面板里） */
+  _skipPerk() {
+    if (this.state !== 'perk') return;
+    this.perkUI.hide();
+    this.hud.showSupplyToast('跳过强化', '本波未选择任何增益');
+    this._resumeFromPerk();
+  }
+
+  _resumeFromPerk() {
+    // 觉醒模式：每隔 AWAKEN_EVERY 波，perk 后追加觉醒选项
+    if (this.mode === 'awakening') {
+      const waveIdx = this.enemies.waveIndex | 0;
+      const justCleared = waveIdx + 1;
+      if (justCleared > 0 && justCleared % AWAKEN_EVERY === 0) {
+        this._offerAwaken();
+        return;
+      }
+    }
+    this.state = 'playing';
+    this.input.enabled = true;
+    this._ignoreBlurUntil = performance.now() + 800;
+    this.input.requestLock();
+  }
+
+  // ---------------- 觉醒模式专属 ----------------
+  /** 弹出觉醒三选一（暂停战斗，选完继续） */
+  _offerAwaken() {
+    if (this.state !== 'perk' && this.state !== 'playing') return;
+    const options = this.awakening.roll(3);
+    if (!options.length) {
+      this._resumeFromAwaken();
+      return;
+    }
+    this.state = 'awaken';
+    this.input.enabled = false;
+    this.input.releaseLock();
+    this.gun.setMouseDown(false);
+    this.gun.setAiming(false);
+    if (this._ammoWheelOpen) {
+      this._ammoWheelOpen = false;
+      this.gun.closeAmmoWheel();
+    }
+    this.awakenUI.show(options, this.awakening);
+    // 觉醒闪光 + 屏幕震动（postFX hit-red 短暂爆发）
+    this.postfx?.setDamage(1.0);
+    this.audio?.playSfx?.('alarm');
+  }
+
+  /** 选中一项觉醒 perk，可能触发形态解锁 */
+  _pickAwaken(id) {
+    if (this.state !== 'awaken') return;
+    const hpBefore = this.player.health.maxHealth;
+    const armorBefore = this.player.health.maxArmor;
+    const result = this.awakening.pick(id);
+    this.awakenUI.hide();
+    if (result) {
+      this._applyGrowth();
+      // 新增的生命 / 护甲上限立即补满
+      const hpGain = this.player.health.maxHealth - hpBefore;
+      const armorGain = this.player.health.maxArmor - armorBefore;
+      if (hpGain > 0) this.player.health.heal(hpGain);
+      if (armorGain > 0) this.player.health.addArmor(armorGain);
+      // HUD 常驻形态徽章
+      this.awakenUI.renderBadges(this.awakening);
+      this.hud.showSupplyToast(`觉醒 · ${result.def.name}`, result.def.desc);
+      this.audio.playSfx('chime');
+      // 形态解锁：额外 toast + 视觉反馈
+      for (const f of result.newForms) {
+        this.hud.showSupplyToast(`★ 形态解锁 ${f.route === 'fury' ? '狂暴' : f.route === 'warden' ? '守护' : '异能'} Lv.${f.level}`, '新形态额外强化已激活');
+        this.audio.playSfx('alarm');
+        this.postfx?.setDamage(0.6);
+      }
+    }
+    this._resumeFromAwaken();
+  }
+
+  _skipAwaken() {
+    if (this.state !== 'awaken') return;
+    this.awakenUI.hide();
+    this.hud.showSupplyToast('暂不觉醒', '下次觉醒窗口再见');
+    this._resumeFromAwaken();
+  }
+
+  _resumeFromAwaken() {
+    this.state = 'playing';
+    this.input.enabled = true;
+    this._ignoreBlurUntil = performance.now() + 800;
+    this.input.requestLock();
   }
 
   // ---------------- 守城商店（TAB 常驻） ----------------
@@ -1013,6 +1366,8 @@ export class Game {
       } else if (it.kind === 'heal') {
         tip = `生命 ${Math.round(h.health)}/${Math.round(h.maxHealth)}`;
         if (h.health >= h.maxHealth - 0.01) { disabled = true; tip = '生命已满'; }
+      } else if (it.kind === 'trap') {
+        tip = this.trapSystem.blueprint === it.trap ? '已持有该蓝图' : '购买后按 F 放置';
       }
       return {
         id,
@@ -1053,6 +1408,8 @@ export class Game {
       const beforeHp = this.player.health.health;
       this.player.health.heal(9999);
       applied += this.player.health.health - beforeHp;
+    } else if (it.kind === 'trap') {
+      applied = this.trapSystem.setBlueprint(it.trap) ? 1 : 0;
     }
     if (applied <= 0) {
       this.defenseUI.updateShop(
@@ -1068,6 +1425,12 @@ export class Game {
       `${it.name} 补给完成`
     );
     this.hud.showSupplyToast(it.name, it.desc);
+
+    // 装置购买后立刻收起商店，方便玩家走到位置按 F 放置
+    if (it.kind === 'trap') {
+      this._closeShop();
+      this.hud.showSupplyToast('蓝图已就绪', `走到位置按 F 放置${it.name}（B 取消）`);
+    }
   }
 
   // ---------------- 局内任务目标 ----------------
@@ -1128,6 +1491,7 @@ export class Game {
     this.stats.endedAt = performance.now();
     this._persistAmmoStock();
     this.state = 'result';
+    this.throwSystem.cancel();
     this.input.enabled = false;
     this.input.releaseLock();
     this.gun.setMouseDown(false);
@@ -1282,11 +1646,15 @@ export class Game {
       if (this.state === 'lobby_panel') this.lobby.tick(dt);
       this.lobby.render(this.renderer);
     } else {
-      this.renderer.render(this.scene, this.camera);
+      this.postfx.render(this.scene, this.camera);
     }
   }
 
   _update(dt) {
+    // 合成音源推进（BGM 脉冲 / 风声 / 随机乌鸦）
+    this.audio.update(dt);
+    // 后期处理（受击闪红衰减）
+    this.postfx.update(dt);
     // 调试：F1 随时切换 FPS 面板（暂停/死亡时也可用）
     if (this.input.consumeAction('debugFps')) this._toggleFps();
 
@@ -1339,7 +1707,7 @@ export class Game {
       if (!wheelHeld && !mounted && !carrying && input.consumeAction('reload')) this.gun.startReload();
 
       if (!mounted && !carrying) {
-        const slots = ['rifle', 'pistol', 'shotgun', 'sniper', null];
+        const slots = ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'rpg'];
         for (let i = 0; i < slots.length; i++) {
           if (input.consumeAction('weapon' + (i + 1)) && slots[i]) {
             this.gun.switchWeapon(slots[i]);
@@ -1347,22 +1715,41 @@ export class Game {
         }
         const wheel = input.consumeWheel();
         if (Math.abs(wheel) > 30) this.gun.switchWeaponByDelta(wheel);
+
+        // G / H：进入手雷 / 燃烧瓶投掷态（再按一次取消）
+        if (!this.debugEl) {
+          if (input.consumeAction('grenade')) this._toggleThrow('frag');
+          if (input.consumeAction('molotov')) this._toggleThrow('molotov');
+        }
       } else {
         input.consumeWheel();
       }
 
       // 拾取：场景武器交互优先，其次才是补给箱
       if (input.consumeAction('pickup')) {
-        const handled = defense ? defense.tryInteract() : false;
-        if (!handled) {
-          const got = this.supplies.pickupNearest();
-          if (!got) this.hud.showSupplyToast('附近没有补给', '靠近补给箱再按 F');
+        if (this.trapSystem.blueprint) {
+          // 手持蓝图时 F 优先放置装置
+          const placed = this.trapSystem.tryPlace();
+          this.hud.showSupplyToast(placed.ok ? '装置已布置' : '无法放置', placed.message);
+        } else {
+          const handled = defense ? defense.tryInteract() : false;
+          if (!handled) {
+            const got = this.supplies.pickupNearest();
+            if (!got) this.hud.showSupplyToast('附近没有补给', '靠近补给箱再按 F');
+          }
         }
       }
       if (input.consumeAction('autoPickup')) this._toggleAutoPickup();
 
-      // 尚未接入的交互（背包 / 地图 / 面板 / 技能）
-      if (input.consumeAction('backpack')) this._featureSoon('背包', '物资系统开发中');
+      // 背包键：持蓝图时用于取消放置
+      if (input.consumeAction('backpack')) {
+        if (this.trapSystem.blueprint) {
+          this.trapSystem.clearBlueprint();
+          this.hud.showSupplyToast('已收起蓝图', '按 B 取消放置');
+        } else {
+          this._featureSoon('背包', '物资系统开发中');
+        }
+      }
       if (input.consumeAction('map')) this._featureSoon('地图', '战术地图开发中');
       if (input.consumeAction('panel')) {
         // TAB = 军需商店（守城 / 闯关 / 无尽通用，随时补给）
@@ -1394,9 +1781,12 @@ export class Game {
           this.gun.setMouseDown(false);
           this.gun.setFirePressed(false);
         } else {
-          this.gun.setMouseDown(!wheelOpen && input.actionDown('fire'));
-          this.gun.setFirePressed(!wheelOpen && input.actionPressed('fire'));
-          this.gun.update(dt, delta, true);
+          // 投掷态下左键用于蓄力，不触发开枪
+          const throwing = !!this.throwSystem.mode;
+          this.gun.setMouseDown(!throwing && !wheelOpen && input.actionDown('fire'));
+          this.gun.setFirePressed(!throwing && !wheelOpen && input.actionPressed('fire'));
+          this.gun.update(dt, delta, !throwing);
+          this.throwSystem.updateAim(dt, !throwing && !wheelOpen && input.actionDown('fire'));
         }
       }
 
@@ -1408,11 +1798,27 @@ export class Game {
         }
       }
 
-      // 敌人
-      this.enemies.update(dt);
+      // 敌人（perk「子弹时间」期间周围时间流速降低）
+      let enemyDt = dt;
+      if (this._perkSlowTimer > 0) {
+        this._perkSlowTimer -= dt;
+        enemyDt = dt * (1 - this.perks.slowMo);
+      }
+      this.enemies.update(enemyDt);
+
+      // BGM 张力：波次越靠后越紧张
+      const waveIdx = this.enemies.waveIndex | 0;
+      const waveTotal = this.enemies.infinite ? 10 : Math.max(1, this.enemies.waves.length);
+      this.audio.setBattleIntensity(Math.min(1, waveIdx / waveTotal));
 
       // 场景可爆炸物（油桶 / 汽车引信与连锁爆炸）
       this.explosions.update(dt);
+
+      // 投掷物（手雷 / 燃烧瓶飞行、引信与地面火区）
+      this.throwSystem.update(dt);
+
+      // 陷阱与炮塔（地雷触发 / 喷火 / 电网 / 自动索敌）
+      this.trapSystem.update(dt);
 
       // 机甲形态燃料 / 护盾 / 哨戒炮塔
       this.mech.update(dt);
@@ -1430,10 +1836,37 @@ export class Game {
       this.effects.update(dt);
       this.casings.update(dt);
 
+      // 昼夜 / 天气循环（playing 状态推进时间，大厅/暂停停住不动）
+      this.dayNight.update(dt, true);
+
       // HUD 数值
       this.hud.setHealth(this.player.health.health);
       this.hud.setArmor(this.player.health.armor);
       this.hud.setEnemies(this.enemies.waveRemaining);
+      this.throwUI.update(this.throwSystem, this.trapSystem.blueprintName);
+
+      // 小地图雷达每帧刷新
+      if (this.hud.minimap) {
+        this.hud.minimap.draw({
+          playerPos: this.player.position,
+          playerYaw: this.mouseLook.yaw,
+          enemies: this.enemies.enemies,
+          spawnPoints: this.map.spawnPoints || [],
+        });
+      }
+
+
+      // 受击反馈：生命 + 护甲总量下降时触发边缘闪红
+      const vital = this.player.health.health + this.player.health.armor;
+      if (this._lastVital !== null && vital < this._lastVital) this.postfx.setDamage(1);
+      this._lastVital = vital;
+
+      // 低血量状态（生命占比 < 30%）：屏幕边框警告 + 心跳节拍
+      const hpRatio = this.player.health.health / Math.max(1, this.player.health.maxHealth);
+      if (this.hud.lowhpOverlay) {
+        const isLow = hpRatio < 0.30;
+        this.hud.lowhpOverlay.classList.toggle('hidden', !isLow);
+      }
 
       // 死亡判定
       if (this.player.dead && this.state === 'playing') this._endMatch(false);
@@ -1445,6 +1878,18 @@ export class Game {
       if (this.input.consumeAction('pause') || this.input.consumeAction('panel')) {
         this._closeShop();
       }
+    } else if (this.state === 'perk') {
+      // 三选一强化面板：战斗完全暂停，只保留场景演出
+      this.effects.update(dt);
+      this.casings.update(dt);
+      this.mouseLook.update(0);
+      if (this.input.consumeAction('pause')) this._skipPerk();
+    } else if (this.state === 'awaken') {
+      // 觉醒面板：战斗完全暂停，只保留场景演出
+      this.effects.update(dt);
+      this.casings.update(dt);
+      this.mouseLook.update(0);
+      if (this.input.consumeAction('pause')) this._skipAwaken();
     } else if (this.state === 'panel') {
       // 成长面板：战斗暂停，只保留场景演出；V / ESC 关闭
       this.effects.update(dt);

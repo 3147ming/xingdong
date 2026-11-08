@@ -63,6 +63,13 @@ export class GunSystem {
     this.damageMul = 1;
     this.reloadMul = 1;
     this.fireRateMul = 1;
+    // Roguelike perk 增益（由 Game._applyGrowth 写入）
+    this.perkMagMul = 1;
+    this.perkPierce = 0;
+    this.perkPellets = 0;
+    this.perkExplodeRadius = 0;
+    this.perkExplodeDamage = 0;
+    this.perkBounce = 0;
     // 科研加成：暴击与弱点
     this.critChance = 0;
     this.critMul = 1.5;
@@ -108,6 +115,31 @@ export class GunSystem {
   /** 当前武器配置 */
   get _current() { return this.weapons[this.currentId]; }
   get _state() { return this._states[this.currentId]; }
+
+  /**
+   * 应用 Roguelike perk 增益。
+   * 弹匣容量按改装后的基础值 × 倍率重算，新增容量直接补进当前弹匣。
+   */
+  applyPerkMods(mods = {}) {
+    this.perkMagMul = 1 + (mods.magAdd || 0);
+    this.perkPierce = mods.pierceAdd || 0;
+    this.perkPellets = mods.extraPellets || 0;
+    this.perkExplodeRadius = mods.explodeRadius || 0;
+    this.perkExplodeDamage = mods.explodeDamage || 0;
+    this.perkBounce = mods.bounceAdd || 0;
+
+    for (const id of WEAPON_UNLOCKED) {
+      const base = deriveWeapon(WEAPONS[id], this.loadout[id] || {});
+      const st = this._states[id];
+      const mag = Math.round(base.magazineSize * this.perkMagMul);
+      const old = this.weapons[id].magazineSize;
+      if (mag !== old) {
+        this.weapons[id].magazineSize = mag;
+        st.mag = Math.max(0, Math.min(mag, st.mag + Math.max(0, mag - old)));
+      }
+    }
+    this._syncHud();
+  }
 
   /** 当前弹种 */
   get ammoType() { return AMMO_TYPES[this.ammoIndex]; }
@@ -334,9 +366,9 @@ export class GunSystem {
     const muzzle = this.view.getMuzzleWorldPosition();
     this._muzzle.copy(muzzle);
 
-    // 多弹丸（霰弹枪）或穿透（重狙）—— 每颗弹丸独立射线
-    const pellets = W.pellets || 1;
-    const pierce = (W.pierce || 0) + (ammo.pierceAdd || 0);
+    // 多弹丸（霰弹枪 / 双重射击）或穿透（重狙 / 穿甲弹芯）—— 每颗弹丸独立射线
+    const pellets = (W.pellets || 1) + this.perkPellets;
+    const pierce = (W.pierce || 0) + (ammo.pierceAdd || 0) + this.perkPierce;
     const tracerColor = W.element !== 'none' ? ELEMENTS[W.element].color : ammo.color;
     let anyHit = false;
     let anyKill = false;
@@ -380,6 +412,14 @@ export class GunSystem {
         if (crit) damage *= this.critMul || 1.5;
         const killed = enemyHit.enemy.takeDamage(damage, enemyHit.head);
         const headshot = enemyHit.part === 'head';
+        // 世界空间 → 屏幕空间，显示伤害数字
+        if (this.hud.showDamageNumber) {
+          const proj = enemyHit.point.clone().project(this.camera);
+          const sx = (proj.x * 0.5 + 0.5) * (this._viewportWidth || window.innerWidth);
+          const sy = (1 - (proj.y * 0.5 + 0.5)) * (this._viewportHeight || window.innerHeight);
+          const kind = crit ? 'crit' : (headshot ? 'head' : 'normal');
+          this.hud.showDamageNumber(sx, sy, damage, kind);
+        }
         this.effects.spawnEnemyHit(enemyHit.point);
         this._applyBulletEffects(W, enemyHit, damage, ammo);
         if (killed) {
@@ -405,6 +445,32 @@ export class GunSystem {
       }
 
       this.effects.spawnTracer(muzzle, hitPoint, pellets > 1 ? 0.5 : 1.0, tracerColor);
+
+      // 火箭弹：命中点范围爆炸（打中敌人或墙体都生效），并点燃附近油桶 / 汽车
+      if (W.explodeRadius) {
+        const result = this._explodeAt(hitPoint, W.explodeRadius, W.explodeDamage, '火箭爆炸');
+        this.explosions?.igniteWithin(hitPoint, W.explodeRadius);
+        this.effects.spawnExplosion(hitPoint, W.explodeRadius);
+        this.effects.spawnSmoke(hitPoint, W.explodeRadius);
+        this.effects.spawnBurnMark(hitPoint, W.explodeRadius * 0.9);
+        if (this.audio.playSfx) this.audio.playSfx('boom');
+        this.audio.play('fire2', { volume: 1.0, rate: 0.32 });
+        // 爆炸命中反馈：AOE hitmarker + 击杀播报 + 伤害数字
+        const proj = hitPoint.clone().project(this.camera);
+        const sx = (proj.x * 0.5 + 0.5) * (this._viewportWidth || window.innerWidth);
+        const sy = (1 - (proj.y * 0.5 + 0.5)) * (this._viewportHeight || window.innerHeight);
+        if (result && result.totalDamage > 0) {
+          this.hud.showDamageNumber(sx, sy, result.totalDamage, 'aoe');
+        }
+        const aoeKills = (result && result.killed ? result.killed : 0);
+        if (aoeKills > 0) {
+          this.hud.showHitmarker(true, false, 'aoe');
+          this.hud.showKillPopup('范围爆炸');
+          this.hud.pushKill('范围击杀', `击杀 ×${aoeKills}`);
+        } else {
+          this.hud.showHitmarker(false, false, 'aoe');
+        }
+      }
 
       if (hitEnemy) anyHit = true;
       if (hitList.some(h => h.enemy.health <= 0)) anyKill = true;
@@ -484,6 +550,42 @@ export class GunSystem {
     if (ammo.explodeRadius) {
       this._explodeAt(enemyHit.point, ammo.explodeRadius, ammo.explodeDamage, '爆裂弹');
     }
+
+    // Roguelike perk：爆裂弹头 / 弹射子弹
+    if (this.perkExplodeRadius > 0) {
+      this._explodeAt(enemyHit.point, this.perkExplodeRadius, this.perkExplodeDamage, '爆裂弹头');
+    }
+    if (this.perkBounce > 0) this._bounce(enemyHit, damage, this.perkBounce);
+  }
+
+  /** 弹射子弹：命中后向附近最近的未弹射目标连锁，伤害逐次衰减 */
+  _bounce(hit, damage, bounces) {
+    if (!this.enemies || !this.enemies.enemies) return;
+    const range = 7;
+    const visited = new Set([hit.enemy]);
+    let from = hit.enemy;
+    let dmg = damage * 0.6;
+
+    for (let i = 0; i < bounces; i++) {
+      const point = from && from.position ? from.position : hit.point;
+      let best = null;
+      let bestD = range;
+      for (const e of this.enemies.enemies) {
+        if (!e || e.dead || !e.root || !e.root.visible || visited.has(e)) continue;
+        const d = e.position.distanceTo(point);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (!best) return;
+
+      visited.add(best);
+      const killed = best.takeDamage(dmg);
+      const p = best.position.clone();
+      p.y += 1.0;
+      this.effects.spawnEnemyHit(p);
+      if (killed) this._registerKill(best, false, '弹射击杀');
+      from = best;
+      dmg *= 0.6;
+    }
   }
 
   /** 雷元素：向命中点附近最近的敌人连锁 */
@@ -506,15 +608,21 @@ export class GunSystem {
     }
   }
 
-  /** 范围爆炸（连爆 / 爆裂弹） */
+  /** 范围爆炸（连爆 / 爆裂弹 / 火箭弹）— 返回 {killed, totalDamage} */
   _explodeAt(point, radius, damage, label) {
-    if (!this.enemies || !this.enemies.enemies) return;
+    const result = { killed: 0, totalDamage: 0 };
+    if (!this.enemies || !this.enemies.enemies) return result;
     for (const e of this.enemies.enemies) {
       if (!e || e.dead || !e.root || !e.root.visible) continue;
       if (e.position.distanceTo(point) > radius) continue;
-      if (e.takeDamage(damage)) this._registerKill(e, false, label);
+      result.totalDamage += damage;
+      if (e.takeDamage(damage)) {
+        result.killed += 1;
+        this._registerKill(e, false, label);
+      }
     }
     this.effects.spawnImpact(point, this._upVec);
+    return result;
   }
 
   startReload() {
@@ -549,8 +657,9 @@ export class GunSystem {
   }
 
   addSupply(rounds) {
-    // 补给加到所有武器的备弹
+    // 补给加到所有武器的备弹（单发重武器不从波次补给里白拿，走军需商店采购）
     for (const id of WEAPON_UNLOCKED) {
+      if (this.weapons[id]?.art === 'rpg') continue;
       this._states[id].reserve += Math.max(0, rounds);
     }
     this._syncHud();

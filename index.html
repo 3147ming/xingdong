@@ -178,7 +178,7 @@
           <button class="nav-item" data-tab="armory">军械库</button>
           <button class="nav-item" data-tab="mech">机甲库</button>
           <button class="nav-item" data-tab="talent">身体觉醒</button>
-          <button class="nav-item" data-tab="stats">战绩统计</button>
+          <button class="nav-item" data-tab="testing">测试房（靶场）</button>
           <button class="nav-item" data-tab="settings">设置</button>
         </nav>
 
@@ -209,6 +209,12 @@
                 <h3>无尽守城</h3>
                 <p>同一张领地防线，尸潮没有尽头。核心血量与火力网配置决定你能守到第几波。</p>
                 <p class="mode-meta">无限波 · 核心血量 · 局内金币</p>
+              </div>
+              <div class="mode-card" data-mode="awakening">
+                <span class="mode-badge">觉醒</span>
+                <h3>觉醒模式</h3>
+                <p>每 3 波觉醒一次，累积路线强化触发形态解锁。波次曲线更激进，考验你的觉醒 build 决策。</p>
+                <p class="mode-meta">无限波 · 路线觉醒 · 形态解锁</p>
               </div>
             </div>
 
@@ -342,23 +348,16 @@
             <p class="menu-foot">局外天赋跨模式共享 · 消耗金币与觉醒材料升级</p>
           </div>
 
-          <!-- 战绩统计 -->
-          <div class="tab-page" id="tab-stats">
-            <div class="growth-block">
-              <div class="growth-lv-row">
-                <b id="lobby-level">Lv.1</b>
-                <span id="lobby-xp">0/100 EXP</span>
-                <b id="lobby-points">属性点 0</b>
+          <!-- 测试房（靶场） -->
+          <div class="tab-page" id="tab-testing">
+            <div class="testing-block">
+              <h3>测试房（靶场）</h3>
+              <p class="testing-desc">进入测试地图，可测试各枪械开火、开镜与后座。测试房不计入战绩，不消耗弹药。</p>
+              <div class="testing-actions">
+                <button class="btn primary" id="btn-enter-testing">进入测试房</button>
               </div>
-              <div class="growth-attr-grid" id="lobby-attrs"></div>
+              <p class="menu-foot">测试房仅作枪械手感检查，不与闯关/无尽/守城共享局内进度。</p>
             </div>
-            <div class="stat-grid">
-              <div class="stat-cell"><span>总场次</span><b id="st-runs">0</b></div>
-              <div class="stat-cell"><span>总击杀</span><b id="st-kills">0</b></div>
-              <div class="stat-cell"><span>最高关卡</span><b id="st-level">1</b></div>
-              <div class="stat-cell"><span>无尽最佳波次</span><b id="st-wave">0</b></div>
-            </div>
-            <p class="menu-foot">经验来自击杀与清波 · 每级获得 1 点属性点 · 数据保存在本地浏览器</p>
           </div>
 
           <!-- 设置 -->

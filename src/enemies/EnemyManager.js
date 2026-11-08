@@ -180,6 +180,18 @@ export class EnemyManager {
     // 敌人自身逻辑始终更新（尸体淡出、受击闪红等都靠它）
     for (const e of this.enemies) e.update(dt);
 
+    // 随机丧尸嘶吼：按变体音高合成，距离越远越轻
+    this._growlTimer = (this._growlTimer ?? 1.5) - dt;
+    if (this._growlTimer <= 0) {
+      this._growlTimer = 2.2 + Math.random() * 2.4;
+      const alive = this.enemies.filter((e) => e && !e.dead);
+      if (alive.length > 0 && this.audio) {
+        const e = alive[Math.floor(Math.random() * alive.length)];
+        const d = this.player ? e.position.distanceTo(this.player.position) : 20;
+        if (d < 34) this.audio.playGrowl(e.variant?.id, d);
+      }
+    }
+
     if (this.waveState === STATE.ACTIVE) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0 &&
@@ -209,6 +221,7 @@ export class EnemyManager {
       speedMul: this.waveCfg.speedMul,
     });
     enemy.respawn(point);
+    if (variant === 'boss' && this.audio) this.audio.playSfx('alarm');
     this.waveSpawned += 1;
     this._lastSpawnPoint = point;
   }
