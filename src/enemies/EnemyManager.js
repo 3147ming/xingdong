@@ -188,7 +188,7 @@ export class EnemyManager {
       if (alive.length > 0 && this.audio) {
         const e = alive[Math.floor(Math.random() * alive.length)];
         const d = this.player ? e.position.distanceTo(this.player.position) : 20;
-        if (d < 34) this.audio.playGrowl(e.variant?.id, d);
+        if (d < 34) this.audio.playGrowl(e.variant?.id, d, e.position);
       }
     }
 

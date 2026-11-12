@@ -75,6 +75,7 @@ export function defaultSave() {
       sens: 0.0022,
       vol: 1.0,
       autoPickup: true,
+      quality: 'high',
       binds: { ...DEFAULT_BINDS },
     },
   };

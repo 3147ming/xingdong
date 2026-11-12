@@ -28,6 +28,7 @@ export class SettingsUI {
     this.sensValue = document.getElementById('set-sens-value');
     this.volInput = document.getElementById('set-vol');
     this.volValue = document.getElementById('set-vol-value');
+    this.qualityGroup = document.getElementById('set-quality');
     this.resetBtn = document.getElementById('btn-reset-binds');
 
     this._buildRows();
@@ -94,6 +95,16 @@ export class SettingsUI {
         const v = Number(this.volInput.value);
         this.save.setSetting('vol', v);
         this.volValue.textContent = Math.round(v * 100) + '%';
+        this.onChange();
+      });
+    }
+
+    if (this.qualityGroup) {
+      this.qualityGroup.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-quality]');
+        if (!btn) return;
+        this.save.setSetting('quality', btn.dataset.quality);
+        this.refresh();
         this.onChange();
       });
     }
@@ -206,6 +217,11 @@ export class SettingsUI {
     if (this.volInput) {
       this.volInput.value = String(s.vol);
       if (this.volValue) this.volValue.textContent = Math.round(Number(s.vol) * 100) + '%';
+    }
+    if (this.qualityGroup) {
+      for (const btn of this.qualityGroup.querySelectorAll('button[data-quality]')) {
+        btn.classList.toggle('on', btn.dataset.quality === (s.quality || 'high'));
+      }
     }
   }
 }

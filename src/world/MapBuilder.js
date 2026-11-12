@@ -21,7 +21,104 @@ function canvasTexture(size, draw, repeatX = 1, repeatY = 1) {
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeatX, repeatY);
-  t.anisotropy = 4;
+  t.anisotropy = 8;
+  return t;
+}
+
+/**
+ * 程序化多倍频噪声高度场（0..1，可无缝平铺）。
+ * 用 5 个八度的值噪声双线性插值叠加，比纯随机点更接近混凝土 / 沥青的真实颗粒。
+ * 法线图与粗糙度图都从这同一份高度场派生，保证三张图细节对得上。
+ */
+function heightField(size = 256) {
+  const data = new Float32Array(size * size);
+  const octaves = [[4, 0.40], [8, 0.26], [16, 0.16], [32, 0.11], [64, 0.07]];
+  for (const [cells, weight] of octaves) {
+    const grid = new Float32Array(cells * cells);
+    for (let i = 0; i < grid.length; i++) grid[i] = Math.random();
+    for (let y = 0; y < size; y++) {
+      const gy = (y / size) * cells;
+      const y0 = Math.floor(gy);
+      const y1 = (y0 + 1) % cells;
+      const ty = gy - y0;
+      const row0 = y0 * cells;
+      const row1 = y1 * cells;
+      for (let x = 0; x < size; x++) {
+        const gx = (x / size) * cells;
+        const x0 = Math.floor(gx);
+        const x1 = (x0 + 1) % cells;
+        const tx = gx - x0;
+        const a = grid[row0 + x0];
+        const b = grid[row0 + x1];
+        const c = grid[row1 + x0];
+        const d = grid[row1 + x1];
+        const top = a + (b - a) * tx;
+        const bot = c + (d - c) * tx;
+        data[y * size + x] += (top + (bot - top) * ty) * weight;
+      }
+    }
+  }
+  return data;
+}
+
+/**
+ * 高度场 → 切线空间法线图（Sobel 求梯度）。
+ * 这是参考作里最有效的纹理技法：一张灰度噪声就能换来真实的掠射高光与凹凸感，
+ * 比 bumpMap 更准确（bumpMap 只用一阶差分近似）。
+ */
+function normalTextureFromHeight(data, size, strength = 1) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const at = (x, y) => data[((y + size) % size) * size + ((x + size) % size)];
+  const k = strength * size / 256 * 2.2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (at(x - 1, y) - at(x + 1, y)) * k;
+      const dy = (at(x, y - 1) - at(x, y + 1)) * k;
+      const len = Math.sqrt(dx * dx + dy * dy + 1);
+      const i = (y * size + x) * 4;
+      img.data[i] = Math.round((-dx / len * 0.5 + 0.5) * 255);
+      img.data[i + 1] = Math.round((-dy / len * 0.5 + 0.5) * 255);
+      img.data[i + 2] = Math.round((1 / len * 0.5 + 0.5) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.NoColorSpace;   // 法线图必须是线性数据，不能当 sRGB 解码
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/**
+ * 高度场 → 粗糙度图：凹处更粗糙、凸起被磨得更光。
+ * 结果落在 base ± contrast，避免整面墙都是同一个粗糙度而显得塑料。
+ */
+function roughnessTextureFromHeight(data, size, base = 0.9, contrast = 0.18) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] < min) min = data[i];
+    if (data[i] > max) max = data[i];
+  }
+  const span = Math.max(1e-4, max - min);
+  for (let i = 0; i < data.length; i++) {
+    const h = (data[i] - min) / span;
+    const v = Math.max(0, Math.min(1, base + (0.5 - h) * contrast * 2));
+    const p = i * 4;
+    img.data[p] = img.data[p + 1] = img.data[p + 2] = Math.round(v * 255);
+    img.data[p + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.NoColorSpace;   // 粗糙度图同样是线性数据
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
 
@@ -64,6 +161,47 @@ function asphaltTexture(rx, ry) {
         ctx.lineTo(x, y);
       }
       ctx.stroke();
+    }
+    // 油渍：径向渐变的暗斑，边缘柔和
+    for (let i = 0; i < 16; i++) {
+      const x = Math.random() * s, y = Math.random() * s;
+      const r = 12 + Math.random() * 46;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(12,14,16,${0.28 + Math.random() * 0.22})`);
+      g.addColorStop(0.7, 'rgba(14,16,18,0.16)');
+      g.addColorStop(1, 'rgba(14,16,18,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 轮胎印：两条平行的暗色磨痕
+    for (let i = 0; i < 4; i++) {
+      const y = Math.random() * s;
+      ctx.strokeStyle = `rgba(18,19,21,${0.18 + Math.random() * 0.12})`;
+      ctx.lineWidth = 6 + Math.random() * 4;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(s, y + (Math.random() - 0.5) * 30);
+      ctx.stroke();
+      ctx.lineWidth = 5 + Math.random() * 3;
+      ctx.beginPath();
+      ctx.moveTo(0, y + 22);
+      ctx.lineTo(s, y + 22 + (Math.random() - 0.5) * 30);
+      ctx.stroke();
+    }
+    // 积水：偏冷色的暗亮斑，边缘有反光感
+    for (let i = 0; i < 6; i++) {
+      const x = Math.random() * s, y = Math.random() * s;
+      const r = 10 + Math.random() * 30;
+      const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+      g.addColorStop(0, 'rgba(96,112,124,0.30)');
+      g.addColorStop(0.75, 'rgba(60,72,82,0.22)');
+      g.addColorStop(1, 'rgba(60,72,82,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r, r * (0.45 + Math.random() * 0.4), Math.random() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
     }
   }, rx, ry);
 }
@@ -147,6 +285,67 @@ function cardboardTexture() {
   });
 }
 
+/** 任意尺寸灰度画布 → 切线空间法线图（Sobel，环绕采样） */
+function normalTextureFromCanvas(srcCanvas, strength = 1) {
+  const w = srcCanvas.width;
+  const h = srcCanvas.height;
+  const src = srcCanvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const at = (x, y) => src[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  const k = strength * 6.0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (at(x - 1, y) - at(x + 1, y)) * k;
+      const dy = (at(x, y - 1) - at(x, y + 1)) * k;
+      const len = Math.sqrt(dx * dx + dy * dy + 1);
+      const i = (y * w + x) * 4;
+      img.data[i] = Math.round((-dx / len * 0.5 + 0.5) * 255);
+      img.data[i + 1] = Math.round((-dy / len * 0.5 + 0.5) * 255);
+      img.data[i + 2] = Math.round((1 / len * 0.5 + 0.5) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/** 集装箱加强筋 + 锈蚀凹凸图：竖向瓦楞在平行光下有可读的体积感 */
+function containerBumpTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 256, 128);
+  for (let x = 0; x < 256; x += 16) {
+    const g = ctx.createLinearGradient(x, 0, x + 16, 0);
+    g.addColorStop(0, '#9c9c9c');
+    g.addColorStop(0.45, '#656565');
+    g.addColorStop(0.55, '#5e5e5e');
+    g.addColorStop(1, '#909090');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, 0, 16, 128);
+  }
+  // 锈斑与磕碰：随机亮暗小斑块
+  for (let i = 0; i < 260; i++) {
+    const v = Math.random() < 0.5 ? 44 : 208;
+    ctx.fillStyle = `rgba(${v},${v},${v},${0.10 + Math.random() * 0.26})`;
+    ctx.beginPath();
+    ctx.arc(Math.random() * 256, Math.random() * 128, 1 + Math.random() * 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 const FLOOR_STYLES = {
   asphalt: asphaltTexture,
   concrete: concreteFloorTexture,
@@ -191,11 +390,33 @@ export class MapBuilder {
     const spawnPts = layout.spawnPoints || ENEMY.spawnPoints;
     this.spawnPoints = spawnPts.map((p) => new THREE.Vector3(p.x, 0, p.z));
 
+    // 统一从同一份高度场派生「法线图 + 粗糙度图」：三张图细节对得上，
+    // 平行光掠射时能看出骨料颗粒与磨损，而不是一块平贴图。
+    const surfaceMaps = (size = 256, normalStrength = 1, roughBase = 0.9, roughContrast = 0.18) => {
+      const h = heightField(size);
+      return {
+        normalMap: normalTextureFromHeight(h, size, normalStrength),
+        roughnessMap: roughnessTextureFromHeight(h, size, roughBase, roughContrast),
+      };
+    };
+
+    const concreteMaps = surfaceMaps(256, 0.85, 0.94, 0.16);
+    concreteMaps.normalMap.repeat.set(4, 1);   // 与混凝土贴图 repeat 对齐，避免拉伸
+    concreteMaps.roughnessMap.repeat.set(4, 1);
     this.matConcrete = new THREE.MeshStandardMaterial({
-      map: concreteTexture(), roughness: 0.92, metalness: 0.04,
+      map: concreteTexture(),
+      normalMap: concreteMaps.normalMap,
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      roughnessMap: concreteMaps.roughnessMap,
+      roughness: 1.0, metalness: 0.04,
     });
+    const cardboardMaps = surfaceMaps(256, 0.55, 0.88, 0.1);
     this.matCardboard = new THREE.MeshStandardMaterial({
-      map: cardboardTexture(), roughness: 0.85, metalness: 0.0,
+      map: cardboardTexture(),
+      normalMap: cardboardMaps.normalMap,
+      normalScale: new THREE.Vector2(0.45, 0.45),
+      roughnessMap: cardboardMaps.roughnessMap,
+      roughness: 1.0, metalness: 0.0,
     });
     this.matMetal = new THREE.MeshStandardMaterial({
       color: 0x5a6068, roughness: 0.55, metalness: 0.55,
@@ -214,10 +435,17 @@ export class MapBuilder {
     const w = layout.halfX * 2;
     const d = layout.halfZ * 2;
     const style = FLOOR_STYLES[layout.floorStyle] || asphaltTexture;
+    const floorMap = style(Math.max(4, Math.round(w / 4.6)), Math.max(3, Math.round(d / 4.4)));
+    const floorMaps = surfaceMaps(256, 0.7, 0.95, 0.2);
+    floorMaps.normalMap.repeat.copy(floorMap.repeat);
+    floorMaps.roughnessMap.repeat.copy(floorMap.repeat);
     this.matFloor = new THREE.MeshStandardMaterial({
-      map: style(Math.max(4, Math.round(w / 4.6)), Math.max(3, Math.round(d / 4.4))),
+      map: floorMap,
+      normalMap: floorMaps.normalMap,
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      roughnessMap: floorMaps.roughnessMap,
       color: layout.floorTint != null ? layout.floorTint : 0xffffff,
-      roughness: 0.95, metalness: 0.02,
+      roughness: 1.0, metalness: 0.02,
     });
   }
 
@@ -235,6 +463,8 @@ export class MapBuilder {
     this._buildPillars();
     this._buildSilhouettes();
     this._buildLights();
+    // 出生点 / 巡逻点修正：落在不可进入的碰撞体（建筑内部等）会被挪到最近的空地
+    this._resolveNavigationPoints();
     this.group.traverse((o) => {
       o.matrixAutoUpdate = false;
       o.updateMatrix();
@@ -499,6 +729,7 @@ export class MapBuilder {
     const containers = this.layout.containers || [];
     if (containers.length === 0) return;
     const matDark = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.75, metalness: 0.3 });
+    const containerNormal = normalTextureFromCanvas(containerBumpTexture().image, 1.1);
     const ribGeo = new THREE.BoxGeometry(0.08, 2.4, 2.42);
     const ribCount = containers.length * 11;
     const ribMesh = new THREE.InstancedMesh(ribGeo, matDark, ribCount);
@@ -507,7 +738,9 @@ export class MapBuilder {
     for (const c of containers) {
       const mat = new THREE.MeshStandardMaterial({
         color: c.color != null ? c.color : 0x7a4a2a,
-        roughness: 0.7, metalness: 0.35,
+        normalMap: containerNormal,
+        normalScale: new THREE.Vector2(0.85, 0.85),
+        roughness: 0.72, metalness: 0.35,
       });
       const box = new THREE.Mesh(new THREE.BoxGeometry(6, 2.6, 2.4), mat);
       box.position.set(c.x, 1.3, c.z);
@@ -528,7 +761,7 @@ export class MapBuilder {
       }
       const w = Math.abs(Math.cos(rot)) * 6 + Math.abs(Math.sin(rot)) * 2.4;
       const d = Math.abs(Math.sin(rot)) * 6 + Math.abs(Math.cos(rot)) * 2.4;
-      this.collision.addBox(c.x, 1.3, c.z, w, 2.6, d, 'crate');
+      this.collision.addBox(c.x, 1.3, c.z, w, 2.6, d, 'container');
     }
     ribMesh.instanceMatrix.needsUpdate = true;
     ribMesh.castShadow = true;
@@ -845,5 +1078,49 @@ export class MapBuilder {
         this.collision.addBox(x, h - yStep * 0.5 + 0.55, z - d / 2 - 1.05, balW, 1.1, 0.17, 'wall');
       }
     }
+  }
+
+  // ---------------- 出生点 / 巡逻点合法性修正 ----------------
+  /**
+   * 建筑的四周墙是完整碰撞盒（门只是装饰，不能穿过），
+   * 出生点/巡逻点若落在建筑或集装箱等碰撞体内部，丧尸会刷进无法进入的房子里并卡死。
+   * 这里在建图完成后用碰撞检测校验，非法点外扩到最近的可站立空地。
+   */
+  _resolveNavigationPoints() {
+    this.spawnPoints = this._relocatePoints(this.spawnPoints);
+    this.waypoints = this._relocatePoints(this.waypoints);
+  }
+
+  _relocatePoints(points) {
+    const out = [];
+    for (const p of points) {
+      const spot = this._findFreeSpot(p);
+      if (spot) out.push(spot);
+    }
+    return out;
+  }
+
+  /** 点本身可用则原地返回，否则螺旋外扩找最近的可站立点；找不到返回 null */
+  _findFreeSpot(p) {
+    const R = ENEMY.radius + 0.05;
+    const H = ENEMY.height;
+    const halfX = this.layout.halfX;
+    const halfZ = this.layout.halfZ;
+    const free = (x, z) => {
+      if (Math.abs(x) > halfX - R || Math.abs(z) > halfZ - R) return false;
+      return this.collision.canFit(new THREE.Vector3(x, 0, z), R, H);
+    };
+    if (free(p.x, p.z)) return new THREE.Vector3(p.x, 0, p.z);
+
+    for (let r = 0.6; r <= 9; r += 0.4) {
+      const steps = Math.max(8, Math.round(r * 8));
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const x = p.x + Math.cos(a) * r;
+        const z = p.z + Math.sin(a) * r;
+        if (free(x, z)) return new THREE.Vector3(x, 0, z);
+      }
+    }
+    return null;
   }
 }

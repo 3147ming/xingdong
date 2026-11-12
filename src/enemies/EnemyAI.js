@@ -477,6 +477,9 @@ export class EnemyAI {
     this.root.position.copy(this.position);
     const flinchK = this.flinchTimer > 0 ? this.flinchTimer / ENEMY.flinchTime : 0;
     this.root.rotation.y = this.heading + Math.sin(this.flinchTimer * 18) * 0.12 * flinchK;
+    // 受击：上身后仰 + 轻微侧倾，让命中反馈更明显
+    this.root.rotation.x = -0.30 * flinchK * flinchK;
+    this.root.rotation.z = Math.sin(this.flinchTimer * 13) * 0.10 * flinchK;
     this.bar.position.set(0, ENEMY.height + 0.3, 0);
     this._checkStuck(dt);
   }
@@ -766,6 +769,8 @@ export class EnemyAI {
   /** 朝目标方向移动（含简单绕障） */
   _moveToward(dx, dz, speed, dt) {
     speed *= this.speedMul * this.statusSpeedMul;
+    // 受击硬直：命中瞬间明显减速，连续射击能压住冲锋
+    if (this.flinchTimer > 0) speed *= 0.35;
     const len = Math.hypot(dx, dz);
     if (len < 0.001) return;
     let dirX = dx / len;
@@ -804,6 +809,8 @@ export class EnemyAI {
     this.root.position.copy(this.position);
     const flinchK = this.flinchTimer > 0 ? this.flinchTimer / ENEMY.flinchTime : 0;
     this.root.rotation.y = this.heading + Math.sin(this.flinchTimer * 18) * 0.12 * flinchK;
+    this.root.rotation.x = -0.30 * flinchK * flinchK;
+    this.root.rotation.z = Math.sin(this.flinchTimer * 13) * 0.10 * flinchK;
     this.bar.position.set(0, ENEMY.height + 0.3, 0);
     this._checkStuck(dt);
   }
@@ -941,6 +948,8 @@ export class EnemyAI {
     this.state = 'dead';
     this.deadTimer = ENEMY.deathBodyTime;
     this.velocity.set(0, 0, 0);
+    this.root.rotation.x = 0;   // 清掉受击后仰，交给死亡动画
+    this.root.rotation.z = 0;
     this.bar.visible = false;
     this.windupTimer = 0;
     this.windupDone = false;
@@ -962,6 +971,8 @@ export class EnemyAI {
     this.deadTimer = 0;
     this.state = 'patrol';
     this.root.visible = true;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = 0;
     this.attackTimer = 0;
     this.windupTimer = 0;
     this.windupDone = false;

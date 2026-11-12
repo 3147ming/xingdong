@@ -23,6 +23,8 @@ export class SupplyManager {
     this.audio = opts.audio;
     // 物资箱随机投掷物补给（由 Game 注入 ThrowSystem）
     this.onThrowable = opts.onThrowable || null;
+    // 行囊：状态满员时拾取的补给自动存入（由 Game 注入 InventoryUI）
+    this.inventory = opts.inventory || null;
     // 科研·后勤：掉落率倍率（1 = 基础）
     this.dropChanceMul = 1;
 
@@ -216,6 +218,33 @@ export class SupplyManager {
     return Math.hypot(dx, dz) <= SUPPLY.pickupRadius;
   }
 
+  /** 补给类型 → 行囊物品 id（满员溢出时存入行囊） */
+  _inventoryType(cfg) {
+    if (cfg.heal > 0) return 'medkit';
+    if (cfg.armor > 0) return 'armor';
+    if (cfg.ammo > 0) return 'ammo';
+    if (cfg.throwable > 0) return 'throwable';
+    return null;
+  }
+
+  /** 最近可拾取补给的名称（无则 null），用于战斗内 F 交互提示 */
+  nearestPrompt() {
+    const player = this.player;
+    if (!player || player.dead) return null;
+    let label = null;
+    let best = SUPPLY.pickupRadius;
+    for (const d of this.drops) {
+      const dist = Math.hypot(player.position.x - d.root.position.x, player.position.z - d.root.position.z);
+      if (dist <= best) { best = dist; label = d.cfg.label; }
+    }
+    for (const p of this.points) {
+      if (p.cooldown > 0 || !p.root.visible) continue;
+      const dist = Math.hypot(player.position.x - p.root.position.x, player.position.z - p.root.position.z);
+      if (dist <= best) { best = dist; label = p.cfg.label; }
+    }
+    return label;
+  }
+
   /** 尝试拾取单个补给点；成功返回 true */
   _tryPickup(p) {
     if (!this._inRange(p)) return false;
@@ -230,29 +259,32 @@ export class SupplyManager {
       const before = this.playerHealth.health;
       this.playerHealth.heal(cfg.heal);
       if (this.playerHealth.health > before) took = true;
-      else if (cfg.ammo === 0 && cfg.armor === 0) {
-        // 满血捡医疗包：不消耗，留给残血时用
-        return false;
-      }
     }
     if (cfg.armor > 0 && this.playerHealth) {
       const before = this.playerHealth.armor;
       this.playerHealth.addArmor(cfg.armor);
       if (this.playerHealth.armor > before) took = true;
-      else if (cfg.ammo === 0 && cfg.heal === 0) {
-        return false;   // 满甲捡护甲板：不消耗
-      }
     }
     if (cfg.throwable > 0 && this.onThrowable) {
       this.onThrowable(cfg.throwable);
       took = true;
     }
-    if (!took) return false;
+
+    // 状态满员：不浪费，转存行囊
+    let stored = false;
+    if (!took && this.inventory) {
+      const type = this._inventoryType(cfg);
+      if (type) stored = this.inventory.add(type);
+    }
+    if (!took && !stored) return false;
 
     p.cooldown = SUPPLY.respawnSec;
     p.root.visible = false;
     if (this.audio) this.audio.play('reload', { volume: 0.5, rate: 1.15 });
-    if (this.hud) this.hud.showSupplyToast(cfg.label, cfg.hint);
+    if (this.hud) {
+      if (stored && !took) this.hud.showSupplyToast(`已存入行囊：${cfg.label}`, '按 B 打开行囊使用');
+      else this.hud.showSupplyToast(cfg.label, cfg.hint);
+    }
     return true;
   }
 
@@ -339,7 +371,14 @@ export class SupplyManager {
       this.playerHealth.addArmor(cfg.armor);
       if (this.playerHealth.armor > before) took = true;
     }
+    // 状态满员：转存行囊
+    let stored = false;
+    if (!took && this.inventory) {
+      const type = this._inventoryType(cfg);
+      if (type) stored = this.inventory.add(type);
+    }
     if (this.audio) this.audio.play('reload', { volume: 0.55, rate: 1.25 });
     if (this.hud && took) this.hud.showSupplyToast(`拾取 ${cfg.label}`, cfg.hint);
+    else if (this.hud && stored) this.hud.showSupplyToast(`已存入行囊：${cfg.label}`, '按 B 打开行囊使用');
   }
 }

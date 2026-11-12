@@ -17,28 +17,128 @@ function glowTexture(colorStops) {
   return t;
 }
 
-/** 弹痕贴图：深色弹孔 + 边缘溅射（偏血迹） */
-function decalTexture() {
+/**
+ * 材质化弹痕贴图：金属 / 混凝土 / 木头 / 玻璃各一套。
+ * 参考作把弹孔按材质区分，命中反馈立刻可读 —— 打到油桶是金属撕裂的亮边，
+ * 打到混凝土是灰白粉尘坑，打到木箱是木屑翻起，打到玻璃是放射状白裂纹。
+ */
+function decalTextureFor(surface) {
+  const S = 128;
+  const C = S / 2;
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = c.height = S;
   const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, 64, 64);
-  // 外圈溅射
-  for (let i = 0; i < 10; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = 8 + Math.random() * 14;
-    ctx.fillStyle = `rgba(${60 + Math.random() * 30},${8 + Math.random() * 10},${6},0.55)`;
+  ctx.clearRect(0, 0, S, S);
+
+  /** 不规则多边形（弹孔外形） */
+  const blob = (radius, wobble, points = 13) => {
     ctx.beginPath();
-    ctx.arc(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 1.5 + Math.random() * 3, 0, Math.PI * 2);
+    for (let i = 0; i < points; i++) {
+      const a = (i / points) * Math.PI * 2;
+      const r = radius * (1 + (Math.random() - 0.5) * wobble);
+      const x = C + Math.cos(a) * r;
+      const y = C + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+
+  /** 从中心向外的放射状细线 */
+  const spokes = (count, r0, r1, color, width) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.35;
+      const end = r1 * (0.55 + Math.random() * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(C + Math.cos(a) * r0, C + Math.sin(a) * r0);
+      ctx.lineTo(C + Math.cos(a) * end, C + Math.sin(a) * end);
+      ctx.stroke();
+    }
+  };
+
+  const dust = (r, inner, outer) => {
+    const g = ctx.createRadialGradient(C, C, r * 0.35, C, C, r);
+    g.addColorStop(0, inner);
+    g.addColorStop(1, outer);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(C, C, r, 0, Math.PI * 2);
     ctx.fill();
+  };
+
+  if (surface === 'metal') {
+    dust(C * 0.96, 'rgba(150,158,166,0.20)', 'rgba(120,128,136,0)');
+    // 金属翻边：亮银高光 + 深色撕裂口
+    blob(C * 0.40, 0.55);
+    ctx.fillStyle = 'rgba(196,204,212,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(246,250,255,0.85)';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    blob(C * 0.26, 0.35, 11);
+    ctx.fillStyle = '#08090a';
+    ctx.fill();
+    spokes(9, C * 0.3, C * 0.75, 'rgba(230,238,246,0.7)', 1.1);
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = C * (0.35 + Math.random() * 0.5);
+      ctx.fillStyle = Math.random() < 0.5 ? 'rgba(220,228,236,0.8)' : 'rgba(30,32,34,0.7)';
+      ctx.beginPath();
+      ctx.arc(C + Math.cos(a) * r, C + Math.sin(a) * r, 0.8 + Math.random() * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (surface === 'wood') {
+    // 木屑翻起：浅棕放射薄片
+    spokes(14, C * 0.18, C * 0.9, 'rgba(214,186,138,0.75)', 2.0);
+    spokes(8, C * 0.2, C * 0.62, 'rgba(126,92,54,0.7)', 1.4);
+    ctx.strokeStyle = 'rgba(88,62,34,0.55)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(C, C, C * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+    blob(C * 0.3, 0.5, 10);
+    ctx.fillStyle = 'rgba(34,22,12,0.92)';
+    ctx.fill();
+    dust(C * 0.34, 'rgba(40,26,14,0.9)', 'rgba(40,26,14,0)');
+  } else if (surface === 'glass') {
+    dust(C * 0.9, 'rgba(226,240,248,0.16)', 'rgba(226,240,248,0)');
+    spokes(16, C * 0.08, C * 0.95, 'rgba(244,250,255,0.9)', 0.9);
+    ctx.strokeStyle = 'rgba(238,248,255,0.65)';
+    for (let ring = 1; ring <= 3; ring++) {
+      const r = C * (0.2 + ring * 0.2);
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(C, C, r, Math.random() * 0.8, Math.PI * 0.55 + Math.random() * 1.2);
+      ctx.stroke();
+    }
+    blob(C * 0.14, 0.4, 9);
+    ctx.fillStyle = 'rgba(18,26,30,0.85)';
+    ctx.fill();
+  } else {
+    // 混凝土：灰白粉尘 + 深坑 + 细裂纹
+    dust(C * 0.98, 'rgba(206,202,192,0.30)', 'rgba(196,192,182,0)');
+    spokes(11, C * 0.28, C * 0.86, 'rgba(52,50,46,0.55)', 1.0);
+    blob(C * 0.42, 0.6, 14);
+    ctx.fillStyle = 'rgba(150,146,138,0.5)';
+    ctx.fill();
+    blob(C * 0.3, 0.5, 12);
+    ctx.fillStyle = 'rgba(44,42,38,0.9)';
+    ctx.fill();
+    blob(C * 0.17, 0.3, 9);
+    ctx.fillStyle = '#0b0b0a';
+    ctx.fill();
+    for (let i = 0; i < 22; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = C * (0.5 + Math.random() * 0.55);
+      ctx.fillStyle = Math.random() < 0.5 ? 'rgba(198,194,184,0.55)' : 'rgba(38,36,33,0.5)';
+      ctx.beginPath();
+      ctx.arc(C + Math.cos(a) * r, C + Math.sin(a) * r, 0.6 + Math.random() * 1.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
-  // 中心弹孔
-  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 12);
-  g.addColorStop(0, 'rgba(8,6,5,0.98)');
-  g.addColorStop(0.55, 'rgba(28,16,12,0.9)');
-  g.addColorStop(1, 'rgba(40,20,14,0)');
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(32, 32, 12, 0, Math.PI * 2); ctx.fill();
+
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
@@ -156,13 +256,18 @@ export class Effects {
       this.muzzlePool.push({ sprite: s, life: 0, maxLife: 0.12, vx: 0, vy: 0, vz: 0, baseScale: 0.2 });
     }
 
-    // 墙面弹痕池（临时血迹，自动淡出）
+    // 墙面弹痕池（按命中材质换贴图，自动淡出）
     this.decalPool = [];
-    const decalTex = decalTexture();
+    this.decalTextures = {
+      metal: decalTextureFor('metal'),
+      concrete: decalTextureFor('concrete'),
+      wood: decalTextureFor('wood'),
+      glass: decalTextureFor('glass'),
+    };
     const decalGeo = new THREE.PlaneGeometry(0.17, 0.17);
     for (let i = 0; i < 16; i++) {
       const mat = new THREE.MeshBasicMaterial({
-        map: decalTex, transparent: true, opacity: 0,
+        map: this.decalTextures.concrete, transparent: true, opacity: 0,
         depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
       });
       const mesh = new THREE.Mesh(decalGeo, mat);
@@ -214,8 +319,13 @@ export class Effects {
     item.life = item.maxLife;
   }
 
-  /** 命中墙面：火花 + 临时弹痕 */
-  spawnImpact(point, normal) {
+  /**
+   * 命中墙面：火花 + 材质化弹痕
+   * @param {THREE.Vector3} point 命中点
+   * @param {THREE.Vector3} normal 命中面法线
+   * @param {'metal'|'concrete'|'wood'|'glass'} [surface] 被击中的材质
+   */
+  spawnImpact(point, normal, surface = 'concrete') {
     const item = this._getSpark();
     const offset = normal ? normal.clone().multiplyScalar(0.03) : new THREE.Vector3();
     item.sprite.position.copy(point).add(offset);
@@ -230,7 +340,11 @@ export class Effects {
     decal.mesh.position.copy(point).addScaledVector(n, 0.012);
     decal.mesh.lookAt(point.clone().add(n));
     decal.mesh.rotateZ(Math.random() * Math.PI * 2);
-    decal.mesh.scale.setScalar(0.8 + Math.random() * 0.5);
+    // 金属 / 玻璃弹痕偏小，混凝土坑更大
+    const size = surface === 'metal' || surface === 'glass' ? 0.75 : 1.0;
+    decal.mesh.scale.setScalar(size * (0.8 + Math.random() * 0.5));
+    const tex = this.decalTextures[surface] || this.decalTextures.concrete;
+    if (decal.mesh.material.map !== tex) decal.mesh.material.map = tex;
     decal.mesh.material.opacity = 0.95;
     decal.mesh.visible = true;
     decal.life = decal.maxLife;

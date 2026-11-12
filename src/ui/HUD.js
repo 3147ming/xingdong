@@ -36,6 +36,8 @@ export class HUD {
     this.killfeed = $('killfeed');
     this.reloadBar = $('reload-bar');
     this.reloadBarFill = this.reloadBar.querySelector('i');
+    this.interactPrompt = $('interact-prompt');            // 战斗内 F 交互提示
+    this.interactPromptText = $('interact-prompt-text');
     this.weaponName = $('weapon-name');
     this.weaponTag = $('weapon-tag');
     this.ammoType = $('ammo-type');
@@ -292,6 +294,19 @@ export class HUD {
     el.classList.add('show');
     clearTimeout(this._supplyToastTimer);
     this._supplyToastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  }
+
+  /** 战斗内交互提示：靠近可拾取补给时显示「F 拾取 · 医疗包」，准星同步高亮 */
+  showInteract(text) {
+    if (!this.interactPrompt) return;
+    if (this.interactPromptText) this.interactPromptText.textContent = text;
+    this.interactPrompt.classList.remove('hidden');
+    if (this.crosshair) this.crosshair.classList.add('interactable');
+  }
+
+  hideInteract() {
+    if (this.interactPrompt) this.interactPrompt.classList.add('hidden');
+    if (this.crosshair) this.crosshair.classList.remove('interactable');
   }
 
   /** 换弹提示 */

@@ -101,6 +101,8 @@
     <div id="killfeed"></div>
     <!-- 换弹进度条 -->
     <div id="reload-bar" class="hidden"><i></i></div>
+    <!-- 战斗内交互提示（靠近可拾取补给时显示） -->
+    <div id="interact-prompt" class="hidden"><b>F</b><span id="interact-prompt-text">拾取</span></div>
     <!-- 弹种轮盘（Ctrl+R 按住唤出，鼠标选择） -->
     <div id="ammo-wheel" class="ammo-wheel hidden"></div>
     <!-- 开局操作提示（3 秒后自动淡出） -->
@@ -375,7 +377,15 @@
                   <input type="range" id="set-vol" min="0" max="1" step="0.05" />
                   <b id="set-vol-value">100%</b>
                 </label>
-                <p class="setting-hint">灵敏度与音量即时生效，并自动保存到本地。</p>
+                <div class="setting-row">
+                  <span>画面质量</span>
+                  <div class="quality-group" id="set-quality">
+                    <button type="button" class="btn mini ghost" data-quality="low">低</button>
+                    <button type="button" class="btn mini ghost" data-quality="medium">中</button>
+                    <button type="button" class="btn mini ghost" data-quality="high">高</button>
+                  </div>
+                </div>
+                <p class="setting-hint">灵敏度与音量即时生效，并自动保存到本地。画面质量调整分辨率、阴影与辉光。</p>
               </div>
               <div class="settings-block">
                 <h3>快捷操作</h3>

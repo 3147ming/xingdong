@@ -10,6 +10,18 @@ import { AMMO_SHOP } from '../config/progression.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+/** 碰撞盒 tag → 命中材质（决定弹痕贴图与命中音色） */
+const SURFACE_BY_TAG = {
+  barrel: 'metal',
+  car: 'metal',
+  rack: 'metal',
+  container: 'metal',
+  crate: 'wood',
+  wall: 'concrete',
+  pillar: 'concrete',
+  floor: 'concrete',
+};
+
 export class GunSystem {
   constructor(deps) {
     this.camera = deps.camera;
@@ -244,6 +256,9 @@ export class GunSystem {
       {
         moving: speed > 1.2 && this.player && this.player.grounded,
         airborne: !!(this.player && !this.player.grounded),
+        sprinting: !!(this.player && this.player.isSprinting),
+        vaulting: !!(this.player && this.player.vaulting),
+        landShake: this.player ? this.player.landShake : 0,
         reloading: this.reloading,
         reloadProgress: this.reloadProgress,
         aiming: aimK,
@@ -435,7 +450,10 @@ export class GunSystem {
         hitPoint = furthestHit.point;
       } else if (wallHit) {
         hitPoint = wallHit.point;
-        this.effects.spawnImpact(hitPoint, wallHit.normal);
+        const surface = SURFACE_BY_TAG[wallHit.tag] || 'concrete';
+        this.effects.spawnImpact(hitPoint, wallHit.normal, surface);
+        // 材质化命中音：金属脆响 / 混凝土闷响 / 木头钝响 / 玻璃碎裂
+        if (this.audio.playImpact) this.audio.playImpact(surface, hitPoint);
         // 场景可爆炸物：油桶 / 汽车被击中后点燃引信（2 秒后爆炸）
         if (this.explosions && (wallHit.tag === 'barrel' || wallHit.tag === 'car')) {
           this.explosions.igniteByBox(wallHit.box);

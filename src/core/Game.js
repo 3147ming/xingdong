@@ -25,6 +25,7 @@ import { DayNightSystem } from './DayNightSystem.js';
 import { computeAccuracy, computeScore, pickGrade } from './scoring.js';
 import { OutdoorMap } from '../world/OutdoorMap.js';
 import { LobbyScene } from '../world/LobbyScene.js';
+import { RainSystem } from '../world/RainSystem.js';
 import { SupplyManager } from '../world/SupplyManager.js';
 import { ExplosionSystem } from '../world/ExplosionSystem.js';
 import { ThrowSystem } from '../world/ThrowSystem.js';
@@ -38,6 +39,7 @@ import { Effects } from '../weapons/Effects.js';
 import { CasingSystem } from '../weapons/CasingSystem.js';
 import { EnemyManager } from '../enemies/EnemyManager.js';
 import { HUD } from '../ui/HUD.js';
+import { InventoryUI } from '../ui/InventoryUI.js';
 import { Menu } from '../ui/Menu.js';
 import { SettingsUI } from '../ui/SettingsUI.js';
 import { ArmoryUI } from '../ui/ArmoryUI.js';
@@ -52,6 +54,16 @@ import { ThrowUI } from '../ui/ThrowUI.js';
 import { MechSystem } from '../player/MechSystem.js';
 import { growthTotals } from '../config/growth.js';
 import { MISSIONS, missionProgress, FIELD } from '../config/economy.js';
+
+/**
+ * 画面质量档位（设置页可切换，参考 3A 游戏的低 / 中 / 高预设）：
+ * pixelRatio = 渲染分辨率上限，shadowSize = 阴影贴图分辨率，postfx = 辉光/调色
+ */
+const QUALITY = {
+  low: { pixelRatio: 0.75, shadows: false, shadowSize: 512, postfx: false },
+  medium: { pixelRatio: 1.0, shadows: true, shadowSize: 1024, postfx: true },
+  high: { pixelRatio: 1.5, shadows: true, shadowSize: 2048, postfx: true },
+};
 
 export class Game {
   constructor() {
@@ -95,16 +107,25 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // 色调映射在 PostFX 合成阶段统一做（渲染到 RT 时 Three.js 不会自动应用），
+    // 这里仍设成 ACES，是为了让「武器独立视图」直接画到屏幕时走同一条曲线。
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.06;
-    // 第三轮：开启软阴影（箱子、墙体投射阴影）
+    this.renderer.toneMappingExposure = 1.0;
+    // 软阴影：PCSS（阻塞物搜索 + 可变半影），比固定半径 PCF 有接触硬化
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // 软件渲染（无头 / 无 GPU）：跳过 PCSS 与 SSAO，避免驱动崩溃与超低帧率
+    this._softwareGL = this._detectSoftwareGL();
+    if (!this._softwareGL) this._enablePCSS();
     document.getElementById('app').appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(WORLD.fogColor);
     this.scene.fog = new THREE.Fog(WORLD.fogColor, WORLD.fogNear, WORLD.fogFar);
+
+    // 程序化环境贴图（PMREM）：PBR 金属材质没有环境反射时会渲染成纯黑，
+    // 这里用"摄影棚"式亮面给枪械金属提供反射与柔和补光
+    this._buildEnvironmentMap();
 
     // 基础环境光：避免背光面/武器模型渲染成纯黑影
     const ambient = new THREE.AmbientLight(0xffffff, 0.45);
@@ -121,6 +142,8 @@ export class Game {
     dirLight.shadow.camera.near = 0.5;
     dirLight.shadow.camera.far = 120;
     dirLight.shadow.bias = -0.0005;
+    dirLight.shadow.normalBias = 0.02;
+    dirLight.shadow.radius = 4;    // PCSS 的阻塞物搜索半径（像素）
     this.scene.add(dirLight);
 
     // 昼夜/天气系统：保留 const 声明不变，另外存实例引用供 update 动态调参
@@ -144,10 +167,29 @@ export class Game {
 
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.03, 200);
     this.scene.add(this.camera);
+    // 武器独立视图相机：与主相机共用位置/朝向与 fov，但独立渲染、独立近裁面，
+    // 绘制前清一次深度 → 枪身永远不会插进墙里。
+    this.viewCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 8);
 
-    // 轻量后期处理：Bloom 辉光 + 暗角 + 受击边缘闪红
+    // 降雨系统：跟随相机的 GPU 雨幕，由天气系统切换
+    this.rain = new RainSystem(this.scene);
+
+    // 轻量后期处理：SSAO + Bloom 辉光 + 暗角 + 受击边缘闪红 + ACES 合成
     this.postfx = new PostFX(this.renderer);
+    // 软件渲染 / ?nofx=1：关闭 SSAO（性能与稳定性优先，其余后期保留）
+    if (this._softwareGL || new URLSearchParams(location.search).has('nofx')) {
+      this.postfx.aoEnabled = false;
+    }
     this._lastVital = null;
+    // 动态分辨率：按帧时间自动缩放绘制缓冲（?dynres=0 可关闭）
+    this._dynRes = {
+      enabled: !new URLSearchParams(location.search).has('dynres'),
+      scale: 1,
+      max: 1,
+      acc: 0,
+      n: 0,
+      settle: 3.0,
+    };
 
     // ---- 加载资源 ----
     this.menu = new Menu({
@@ -193,6 +235,11 @@ export class Game {
     this.player = new PlayerController(this.camera, this.input, this.collision, this.audio, this.map.playerSpawn);
 
     this.hud = new HUD();
+    // 行囊：满员拾取的补给自动存入，B 打开使用
+    this.inventory = new InventoryUI({
+      onUse: (type) => this._useInventoryItem(type),
+      onClose: () => this._closeInventory(),
+    });
     // 波间三选一强化卡片（DOM 覆盖层 + 右侧已选图标）
     this.perkUI = new PerkUI({
       onPick: (id) => this._pickPerk(id),
@@ -204,7 +251,8 @@ export class Game {
     });
     this.effects = new Effects(this.scene);
     this.casings = new CasingSystem(this.scene, this.audio);
-    this.weaponView = new WeaponView(this.camera, this.assets);
+    this.weaponView = new WeaponView(this.camera, this.assets, this.viewCamera);
+    this.weaponView.setEnvironment(this.scene.environment);
 
     this.enemies = new EnemyManager({
       scene: this.scene,
@@ -293,6 +341,7 @@ export class Game {
       playerHealth: this.player.health,
       hud: this.hud,
       audio: this.audio,
+      inventory: this.inventory,
       onThrowable: () => {
         const kind = this.throwSystem.grantCache();
         this.hud.showSupplyToast('获得投掷物', kind === 'frag' ? '手雷 +1' : '燃烧瓶 +1');
@@ -422,6 +471,8 @@ export class Game {
 
     // 大厅 3D：可第一人称漫游的基地空间（独立场景，仅大厅 / 面板态渲染）
     this.lobby = new LobbyScene();
+    // 复用战斗场景的 PMREM 环境贴图，让大厅里的金属/玻璃也有反射细节
+    if (this.scene.environment) this.lobby.scene.environment = this.scene.environment;
     this.lobbyHud = document.getElementById('lobby-hud');
     this.lobbyEntry = document.getElementById('lobby-entry');
     this.lobbyInteract = document.getElementById('lobby-interact');
@@ -495,6 +546,7 @@ export class Game {
       return;
     }
     this.audio.resume();
+    this.audio.setSpace?.('outdoor');
     this.audio.startBattleMusic();
     this.audio.startAmbience();
     this.state = 'playing';
@@ -504,6 +556,7 @@ export class Game {
 
     // 局内战地金币：每局从 0 开始，结算清空；守城用核心面板的金币行
     this.runGold = 0;
+    if (this.inventory) this.inventory.reset();
     this._fieldShop = false;
     this.defenseUI.setRunGold(0);
     this.defenseUI.setRunGoldVisible(!this.defense);
@@ -768,6 +821,7 @@ export class Game {
     this.perkUI.reset();
     this.throwSystem.cancel();
     this.audio.stopAmbience();
+    this.audio.setSpace?.('shed');
     this.audio.startLobbyMusic();
     this.input.enabled = true;
     this.input.releaseLock();
@@ -901,6 +955,26 @@ export class Game {
     if (this.audio) this.audio.setMasterVolume(s.vol);
     if (this.mouseLook && Number.isFinite(s.sens)) this.mouseLook.sensitivity = s.sens;
     if (this.supplies) this.supplies.setAutoPickup(s.autoPickup);
+
+    // 画面质量：分辨率 / 阴影 / 辉光即时生效；软件渲染固定走最低档保证可测性
+    const q = this._softwareGL ? QUALITY.low : (QUALITY[s.quality] || QUALITY.high);
+    this._quality = q;
+    if (this.renderer) {
+      this.renderer.shadowMap.enabled = q.shadows;
+      if (this._dnSun) {
+        this._dnSun.castShadow = q.shadows;
+        if (this._dnSun.shadow.mapSize.x !== q.shadowSize) {
+          this._dnSun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+          if (this._dnSun.shadow.map) {
+            this._dnSun.shadow.map.dispose();
+            this._dnSun.shadow.map = null;   // 让渲染器按新分辨率重建阴影贴图
+          }
+        }
+      }
+      if (this.postfx) this.postfx.enabled = q.postfx;
+      // 分辨率与 PostFX 目标尺寸统一由动态分辨率入口处理
+      this._applyRenderScale();
+    }
   }
 
   /** P 键：切换自动拾取 */
@@ -1006,17 +1080,9 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     if (this.lobby) this.lobby.resize();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    // 同步视口尺寸到 GunSystem，用于伤害数字屏幕坐标计算
-    if (this.gun) {
-      this.gun._viewportWidth = window.innerWidth;
-      this.gun._viewportHeight = window.innerHeight;
-    }
-    if (this.postfx) {
-      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-      this.postfx.setSize(size.x, size.y);
-    }
+    // 动态分辨率重置回满档，交给 _tickDynamicResolution 重新收敛
+    if (this._dynRes) { this._dynRes.scale = 1; this._dynRes.settle = 1.5; }
+    this._applyRenderScale();
   }
 
   // ---------------- 波次 / 结算 ----------------
@@ -1305,6 +1371,62 @@ export class Game {
     this.input.enabled = true;
     this._ignoreBlurUntil = performance.now() + 800;
     this.input.requestLock();
+  }
+
+  // ---------------- 行囊 ----------------
+  _openInventory() {
+    if (this.state !== 'playing' || !this.inventory) return;
+    this.state = 'inventory';
+    this.input.enabled = false;
+    this.input.releaseLock();
+    if (this.gun) {
+      this.gun.setMouseDown(false);
+      this.gun.setAiming(false);
+    }
+    this.inventory.open();
+  }
+
+  _closeInventory() {
+    if (this.state !== 'inventory') return;
+    this.state = 'playing';
+    this.input.enabled = true;
+    this._ignoreBlurUntil = performance.now() + 800;
+    this.input.requestLock();
+  }
+
+  /** 行囊物品使用：返回 true 才扣减数量 */
+  _useInventoryItem(type) {
+    if (this.state !== 'inventory' || !this.player) return false;
+    if (type === 'medkit') {
+      if (this.player.health.health >= this.player.health.maxHealth) {
+        this.hud.showSupplyToast('生命已满', '急救包留到受伤时再用');
+        return false;
+      }
+      this.player.health.heal(50);
+      this.hud.showSupplyToast('使用 急救包', '生命 +50');
+      return true;
+    }
+    if (type === 'armor') {
+      if (this.player.health.armor >= this.player.health.maxArmor) {
+        this.hud.showSupplyToast('护甲已满', '护甲板留到受损时再用');
+        return false;
+      }
+      this.player.health.addArmor(25);
+      this.hud.showSupplyToast('使用 护甲板', '护甲 +25');
+      return true;
+    }
+    if (type === 'ammo') {
+      if (!this.gun) return false;
+      this.gun.addSupply(30);
+      this.hud.showSupplyToast('使用 弹药箱', '备弹 +30');
+      return true;
+    }
+    if (type === 'throwable') {
+      const kind = this.throwSystem.grantCache();
+      this.hud.showSupplyToast('使用 投掷包', kind === 'frag' ? '手雷 +1' : '燃烧瓶 +1');
+      return true;
+    }
+    return false;
   }
 
   _buyShopItem(id) {
@@ -1627,6 +1749,138 @@ export class Game {
     }
   }
 
+  // ---------------- 美术：PCSS 软阴影 ----------------
+  /** 检测是否为软件渲染（无头浏览器 / 无 GPU），用于跳过 PCSS 与 SSAO */
+  _detectSoftwareGL() {
+    try {
+      const gl = this.renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : (gl.getParameter(gl.RENDERER) || ''));
+      return /swiftshader|software|llvmpipe|basic render/i.test(name);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * 把内置的固定半径 PCF 阴影替换为 PCSS（百分比渐近软阴影）：
+   * 先做阻塞物搜索，用「遮挡物深度与接收面深度之差」估算半影，
+   * 再做可变半径 PCF —— 贴近地面的接触阴影锐利，远处投影边缘自然变柔。
+   * 只有着色器块结构与预期一致时才替换，避免不同 Three.js 版本上炸掉阴影。
+   */
+  _enablePCSS() {
+    if (Game._pcssPatched) return;
+    const chunk = THREE.ShaderChunk && THREE.ShaderChunk.shadowmap_pars_fragment;
+    const oldHead = 'float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {';
+    if (!chunk || chunk.indexOf(oldHead) < 0) return;   // 版本不符：保持默认阴影
+    const pcss = `
+float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+	float shadow = 1.0;
+	shadowCoord.xyz /= shadowCoord.w;
+	shadowCoord.z += shadowBias;
+	bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;
+	bool frustumTest = inFrustum && shadowCoord.z <= 1.0;
+	if ( frustumTest ) {
+		vec2 texel = vec2( 1.0 ) / shadowMapSize;
+		float search = max( 1.5, shadowRadius ) * 1.35;
+		float receiver = shadowCoord.z;
+		float blockerSum = 0.0;
+		float blockerCount = 0.0;
+		for ( int i = 0; i < 6; i ++ ) {
+			float fi = float( i );
+			float ang = fi * 2.39996323;
+			float rad = sqrt( ( fi + 0.5 ) / 6.0 );
+			vec2 off = vec2( cos( ang ), sin( ang ) ) * rad * search * texel;
+			float d = unpackRGBAToDepth( texture2D( shadowMap, shadowCoord.xy + off ) );
+			if ( d < receiver ) { blockerSum += d; blockerCount += 1.0; }
+		}
+		if ( blockerCount < 0.5 ) {
+			shadow = 1.0;
+		} else {
+			float avgBlocker = blockerSum / blockerCount;
+			float penumbra = clamp( ( receiver - avgBlocker ) * 260.0, 1.0, 10.0 );
+			float sum = 0.0;
+			for ( int i = 0; i < 8; i ++ ) {
+				float fi = float( i );
+				float ang = fi * 2.39996323 + 1.7;
+				float rad = sqrt( ( fi + 0.5 ) / 8.0 );
+				vec2 off = vec2( cos( ang ), sin( ang ) ) * rad * penumbra * texel;
+				sum += step( receiver, unpackRGBAToDepth( texture2D( shadowMap, shadowCoord.xy + off ) ) );
+			}
+			shadow = sum / 8.0;
+		}
+	}
+	return shadow;
+}
+`;
+    THREE.ShaderChunk.shadowmap_pars_fragment = chunk.replace(
+      oldHead,
+      'float basShadowLegacy( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {'
+    ) + pcss;
+    Game._pcssPatched = true;
+  }
+
+  // ---------------- 美术：程序化环境贴图 ----------------
+  /**
+   * 用一间"摄影棚"（渐变天幕 + 高亮柔光板 + 暖色反光板）生成 PMREM 环境贴图。
+   * PBR 金属材质（枪械）没有环境反射时会渲染成纯黑，有了这张图才有金属质感。
+   */
+  _buildEnvironmentMap() {
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const envScene = new THREE.Scene();
+
+    // 天幕：上亮下暗的渐变球（提供整体环境亮度与方向感）
+    const c = document.createElement('canvas');
+    c.width = 2;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 64);
+    grad.addColorStop(0, '#d8e8ff');
+    grad.addColorStop(0.5, '#eef2f6');
+    grad.addColorStop(1, '#3e4348');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 64);
+    const domeTex = new THREE.CanvasTexture(c);
+    domeTex.colorSpace = THREE.SRGBColorSpace;
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(100, 16, 12),
+      new THREE.MeshBasicMaterial({ map: domeTex, side: THREE.BackSide })
+    );
+    envScene.add(dome);
+
+    // 高亮柔光板：让枪械金属表面出现长条柔和高光
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(70, 26),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    panel.position.set(-45, 55, 25);
+    panel.rotation.set(-0.55, 0.6, 0);
+    envScene.add(panel);
+
+    const panel2 = new THREE.Mesh(
+      new THREE.PlaneGeometry(45, 20),
+      new THREE.MeshBasicMaterial({ color: 0xdfe9ff })
+    );
+    panel2.position.set(50, 22, -30);
+    panel2.rotation.set(0.25, -0.85, 0);
+    envScene.add(panel2);
+
+    // 暖色反光板：给暗部一点暖调，避免金属死黑
+    const warm = new THREE.Mesh(
+      new THREE.PlaneGeometry(36, 18),
+      new THREE.MeshBasicMaterial({ color: 0xffd39a })
+    );
+    warm.position.set(8, -22, 45);
+    warm.rotation.set(0.2, 0, 0);
+    envScene.add(warm);
+
+    const rt = pmrem.fromScene(envScene, 0.06);
+    this.scene.environment = rt.texture;
+    this._envRT = rt;   // 保留引用，避免被回收
+    pmrem.dispose();
+    domeTex.dispose();
+  }
+
   // ---------------- 主循环 ----------------
   _loop() {
     const dt = Math.min(0.05, this.clock.getDelta());
@@ -1640,6 +1894,7 @@ export class Game {
       this._fpsFrames = 0;
       this._fpsAcc = 0;
     }
+    this._tickDynamicResolution(dt);
     this._update(dt);
     // 大厅态渲染 3D 基地；面板态保留大厅作为背景；其余渲染战斗场景
     if ((this.state === 'lobby' || this.state === 'lobby_panel') && this.lobby) {
@@ -1647,12 +1902,82 @@ export class Game {
       this.lobby.render(this.renderer);
     } else {
       this.postfx.render(this.scene, this.camera);
+      // 武器最后单独画一遍（清深度 + 独立场景），保证枪身不插进墙里
+      this.weaponView.renderOverlay(this.renderer);
+    }
+  }
+
+  /**
+   * 动态分辨率：按平均帧时间在 0.6~1.0 之间缩放绘制缓冲。
+   * 只调 pixelRatio，HUD / 交互全部不受影响，掉帧时优先保帧率。
+   */
+  _tickDynamicResolution(dt) {
+    const d = this._dynRes;
+    if (!d || !d.enabled) return;
+    if (this.state !== 'playing') { d.acc = 0; d.n = 0; return; }
+    if (d.settle > 0) { d.settle -= dt; d.acc = 0; d.n = 0; return; }
+    d.acc += dt;
+    d.n += 1;
+    if (d.n < 45 && d.acc < 0.9) return;
+    const avgMs = (d.acc / d.n) * 1000;
+    d.acc = 0;
+    d.n = 0;
+    let scale = d.scale;
+    if (avgMs > 21.5) scale = Math.max(0.6, scale - (avgMs > 33 ? 0.15 : 0.1));
+    else if (avgMs < 16.8) scale = Math.min(d.max, scale + 0.1);
+    scale = Math.round(scale * 10) / 10;
+    if (scale !== d.scale) {
+      d.scale = scale;
+      d.settle = 1.2;
+      this._applyRenderScale();
+    }
+    // 已经缩到最低还掉帧：关掉 AO、把阴影贴图降到 1024（软件渲染 / 集显兜底）
+    if (d.scale <= 0.6 && avgMs > 30) {
+      d.floorHits = (d.floorHits || 0) + 1;
+      if (d.floorHits >= 2 && !d.degraded) {
+        d.degraded = true;
+        d.floorHits = 0;
+        if (this.postfx) {
+          this.postfx.aoEnabled = false;
+          this.postfx.aoStrength = 0;
+        }
+        if (this._dnSun && this._dnSun.shadow.mapSize.x > 1024) {
+          this._dnSun.shadow.mapSize.set(1024, 1024);
+          if (this._dnSun.shadow.map) {
+            this._dnSun.shadow.map.dispose();
+            this._dnSun.shadow.map = null;
+          }
+        }
+      }
+    } else {
+      d.floorHits = 0;
+    }
+  }
+
+  /** 按当前动态分辨率重建绘制缓冲与 PostFX 目标 */
+  _applyRenderScale() {
+    const q = this._quality || QUALITY.high;
+    const base = Math.min(window.devicePixelRatio || 1, q.pixelRatio);
+    const scale = this._dynRes ? this._dynRes.scale : 1;
+    this.renderer.setPixelRatio(base * scale);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    if (this.postfx) {
+      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      this.postfx.setSize(size.x, size.y);
+    }
+    if (this.gun) {
+      this.gun._viewportWidth = window.innerWidth;
+      this.gun._viewportHeight = window.innerHeight;
     }
   }
 
   _update(dt) {
     // 合成音源推进（BGM 脉冲 / 风声 / 随机乌鸦）
     this.audio.update(dt);
+    // 听者跟随相机：PannerNode 的距离与前后定位靠这个才准
+    if (this.state !== 'lobby' && this.state !== 'lobby_panel' && this.audio.setListener) {
+      this.audio.setListener(this.camera);
+    }
     // 后期处理（受击闪红衰减）
     this.postfx.update(dt);
     // 调试：F1 随时切换 FPS 面板（暂停/死亡时也可用）
@@ -1741,13 +2066,13 @@ export class Game {
       }
       if (input.consumeAction('autoPickup')) this._toggleAutoPickup();
 
-      // 背包键：持蓝图时用于取消放置
+      // 背包键：持蓝图时用于取消放置，否则打开行囊
       if (input.consumeAction('backpack')) {
         if (this.trapSystem.blueprint) {
           this.trapSystem.clearBlueprint();
           this.hud.showSupplyToast('已收起蓝图', '按 B 取消放置');
         } else {
-          this._featureSoon('背包', '物资系统开发中');
+          this._openInventory();
         }
       }
       if (input.consumeAction('map')) this._featureSoon('地图', '战术地图开发中');
@@ -1832,12 +2157,30 @@ export class Game {
       // 补给点（靠近自动拾取 / 冷却刷新）
       this.supplies.update(dt);
 
+      // 交互提示：靠近可拾取补给时显示「F 拾取 · xxx」并高亮准星
+      const nearPickup = this.supplies.nearestPrompt();
+      if (nearPickup && !this.defense) this.hud.showInteract(`拾取 · ${nearPickup}`);
+      else this.hud.hideInteract();
+
       // 特效与弹壳
       this.effects.update(dt);
       this.casings.update(dt);
 
       // 昼夜 / 天气循环（playing 状态推进时间，大厅/暂停停住不动）
       this.dayNight.update(dt, true);
+
+      // 天气联动：下雨时开启雨幕，同时把地面打湿（粗糙度下降 → 环境反射变强）
+      const rainy = this._dnState.weather === 'rain';
+      this.rain.setEnabled(rainy);
+      this.rain.update(dt, this.camera.position);
+      const floorMat = this.map && this.map.matFloor;
+      if (floorMat) {
+        const k = Math.min(1, dt * 0.9);
+        floorMat.roughness += ((rainy ? 0.38 : 0.95) - floorMat.roughness) * k;
+        floorMat.metalness += ((rainy ? 0.16 : 0.02) - floorMat.metalness) * k;
+        const envI = rainy ? 1.5 : 1.0;
+        floorMat.envMapIntensity += (envI - (floorMat.envMapIntensity ?? 1)) * k;
+      }
 
       // HUD 数值
       this.hud.setHealth(this.player.health.health);
@@ -1877,6 +2220,15 @@ export class Game {
       this.mouseLook.update(0);
       if (this.input.consumeAction('pause') || this.input.consumeAction('panel')) {
         this._closeShop();
+      }
+    } else if (this.state === 'inventory') {
+      // 行囊：战斗暂停，B / Esc 关闭
+      this.effects.update(dt);
+      this.casings.update(dt);
+      this.mouseLook.update(0);
+      this.hud.hideInteract();
+      if (this.input.consumeAction('pause') || this.input.consumeAction('backpack')) {
+        this.inventory.close();
       }
     } else if (this.state === 'perk') {
       // 三选一强化面板：战斗完全暂停，只保留场景演出
