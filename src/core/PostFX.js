@@ -161,15 +161,15 @@ export class PostFX {
   constructor(renderer) {
     this.renderer = renderer;
     this.strength = 0.75;
-    this.threshold = 1.05;    // HDR 线性空间的亮度阈值（开启色调映射后要抬高）
-    this.vignette = 0.55;
+    this.threshold = 1.18;    // HDR 线性空间的亮度阈值（开启色调映射后要抬高）
+    this.vignette = 0.26;     // 暗角收轻：不再压暗四周画面
     this.damage = 0;
     this.enabled = true;
 
     this.aoEnabled = true;
-    this.aoStrength = 0.85;
+    this.aoStrength = 0.55;   // 遮蔽只做接触阴影，避免整体发灰发暗
     this.aoRadius = 0.55;
-    this.aoIntensity = 1.15;
+    this.aoIntensity = 1.0;
     this.aoBias = 0.022;
 
     this._size = new THREE.Vector2(1, 1);

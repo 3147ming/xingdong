@@ -10,3 +10,6 @@ Thumbs.db
 # 本地临时
 *.log
 tmp/
+
+# 分享包（历史上误提交过 11MB，仅保留本地）
+.trae-html-share-packages/

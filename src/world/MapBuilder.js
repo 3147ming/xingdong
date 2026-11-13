@@ -355,15 +355,15 @@ const FLOOR_STYLES = {
 const DEFAULT_LIGHTS = {
   hemiSky: 0xbcd4ea,
   hemiGround: 0x4a4234,
-  hemiIntensity: 0.85,
+  hemiIntensity: 1.15,
   sunColor: 0xffeed2,
-  sunIntensity: 2.4,
+  sunIntensity: 2.8,
   sunPos: [-30, 42, 22],
   fillColor: 0x7fa4cc,
-  fillIntensity: 0.5,
+  fillIntensity: 0.8,
   fillPos: [22, 16, -28],
-  ambientColor: 0x46505c,
-  ambientIntensity: 0.5,
+  ambientColor: 0x6c7784,
+  ambientIntensity: 0.8,
 };
 
 export class MapBuilder {

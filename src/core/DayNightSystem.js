@@ -56,44 +56,44 @@ export class DayNightSystem {
     // 4 段分段 lerp
     let sunColor, sunIntensity, ambIntensity, fogColVal, ambColVal;
     if (t < 0.25) {
-      // 夜间 (0..0.25) — 冷蓝
+      // 夜间 (0..0.25) — 冷蓝，保留夜晚氛围但抬高亮度下限
       const k = t / 0.25;
-      sunIntensity = 0.08 + 0.22 * k; ambIntensity = 0.18 + 0.14 * k;
-      sunColor = new THREE.Color(0x3a4a7a).lerp(new THREE.Color(0xffaa66), k);
-      ambColVal = 0x3c4868;
-      fogColVal = 0x4a5470;
+      sunIntensity = 0.30 + 0.30 * k; ambIntensity = 0.42 + 0.18 * k;
+      sunColor = new THREE.Color(0x5a6a9a).lerp(new THREE.Color(0xffb877), k);
+      ambColVal = 0x6a7694;
+      fogColVal = 0x76839e;
     } else if (t < 0.5) {
       // 清晨 (0.25..0.5) — 暖橙 → 白
       const k = (t - 0.25) / 0.25;
-      sunIntensity = 0.30 + 0.60 * k; ambIntensity = 0.32 + 0.12 * k;
-      sunColor = new THREE.Color(0xffaa66).lerp(new THREE.Color(0xfff4d8), k);
-      ambColVal = new THREE.Color(0x8899aa).lerp(new THREE.Color(0xc8d0d8), k).getHex();
-      fogColVal = new THREE.Color(0xa8b4c0).lerp(new THREE.Color(0xb9c9d6), k).getHex();
+      sunIntensity = 0.75 + 0.70 * k; ambIntensity = 0.60 + 0.14 * k;
+      sunColor = new THREE.Color(0xffb877).lerp(new THREE.Color(0xfff6e4), k);
+      ambColVal = new THREE.Color(0xa8b6c4).lerp(new THREE.Color(0xd8e0e8), k).getHex();
+      fogColVal = new THREE.Color(0xc6d2dc).lerp(new THREE.Color(0xd6e4ef), k).getHex();
     } else if (t < 0.75) {
       // 正午 (0.5..0.75) — 白 → 橙红
       const k = (t - 0.5) / 0.25;
-      sunIntensity = 0.90 - 0.55 * k; ambIntensity = 0.44 - 0.18 * k;
-      sunColor = new THREE.Color(0xfff4d8).lerp(new THREE.Color(0xff7a3a), k);
-      ambColVal = new THREE.Color(0xc8d0d8).lerp(new THREE.Color(0x886655), k).getHex();
-      fogColVal = new THREE.Color(0xb9c9d6).lerp(new THREE.Color(0xd0a080), k).getHex();
+      sunIntensity = 1.45 - 0.60 * k; ambIntensity = 0.74 - 0.18 * k;
+      sunColor = new THREE.Color(0xfff6e4).lerp(new THREE.Color(0xff9455), k);
+      ambColVal = new THREE.Color(0xd8e0e8).lerp(new THREE.Color(0xb08a76), k).getHex();
+      fogColVal = new THREE.Color(0xd6e4ef).lerp(new THREE.Color(0xe8bfa0), k).getHex();
     } else {
       // 黄昏 (0.75..1.0) — 橙红 → 冷蓝
       const k = (t - 0.75) / 0.25;
-      sunIntensity = 0.35 - 0.27 * k; ambIntensity = 0.26 - 0.08 * k;
-      sunColor = new THREE.Color(0xff7a3a).lerp(new THREE.Color(0x3a4a7a), k);
-      ambColVal = new THREE.Color(0x886655).lerp(new THREE.Color(0x3c4868), k).getHex();
-      fogColVal = new THREE.Color(0xd0a080).lerp(new THREE.Color(0x4a5470), k).getHex();
+      sunIntensity = 0.85 - 0.55 * k; ambIntensity = 0.56 - 0.14 * k;
+      sunColor = new THREE.Color(0xff9455).lerp(new THREE.Color(0x5a6a9a), k);
+      ambColVal = new THREE.Color(0xb08a76).lerp(new THREE.Color(0x6a7694), k).getHex();
+      fogColVal = new THREE.Color(0xe8bfa0).lerp(new THREE.Color(0x76839e), k).getHex();
     }
 
-    // 天气叠加
+    // 天气叠加（阴天/雨天只做轻微压暗，不再把场景打成昏暗）
     if (s.weather === 'fog') {
-      sunIntensity *= 0.55; ambIntensity *= 0.80;
-      fogColVal = new THREE.Color(fogColVal).lerp(new THREE.Color(0x9aa5b0), 0.35).getHex();
-      this.fog.near = 18; this.fog.far = 85;
+      sunIntensity *= 0.72; ambIntensity *= 0.90;
+      fogColVal = new THREE.Color(fogColVal).lerp(new THREE.Color(0xc3ccd6), 0.35).getHex();
+      this.fog.near = 24; this.fog.far = 105;
     } else if (s.weather === 'rain') {
-      sunIntensity *= 0.65; ambIntensity *= 0.80;
-      fogColVal = new THREE.Color(fogColVal).lerp(new THREE.Color(0x485060), 0.40).getHex();
-      this.fog.near = 30; this.fog.far = 135;
+      sunIntensity *= 0.82; ambIntensity *= 0.90;
+      fogColVal = new THREE.Color(fogColVal).lerp(new THREE.Color(0x8a94a4), 0.35).getHex();
+      this.fog.near = 34; this.fog.far = 150;
     } else {
       this.fog.near = s.fogNear0; this.fog.far = s.fogFar0;
     }
@@ -107,9 +107,9 @@ export class DayNightSystem {
     this.bg.copy(this.fog.color);
   }
 
-  /** 重置（新局开始） */
+  /** 重置（新局开始）：从明亮的上午开始，避免一进局就是昏暗清晨 */
   reset() {
-    this.state.time = 0.40;
+    this.state.time = 0.46;
     this.state.weather = 'clear';
     this.state.nextWeatherAt = 45;
   }

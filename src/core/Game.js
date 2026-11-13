@@ -110,7 +110,7 @@ export class Game {
     // 色调映射在 PostFX 合成阶段统一做（渲染到 RT 时 Three.js 不会自动应用），
     // 这里仍设成 ACES，是为了让「武器独立视图」直接画到屏幕时走同一条曲线。
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 1.18;
     // 软阴影：PCSS（阻塞物搜索 + 可变半影），比固定半径 PCF 有接触硬化
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -127,11 +127,11 @@ export class Game {
     // 这里用"摄影棚"式亮面给枪械金属提供反射与柔和补光
     this._buildEnvironmentMap();
 
-    // 基础环境光：避免背光面/武器模型渲染成纯黑影
-    const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+    // 基础环境光：避免背光面/武器模型渲染成纯黑影（整体偏明亮，不靠暗部撑氛围）
+    const ambient = new THREE.AmbientLight(0xffffff, 0.70);
     this.scene.add(ambient);
     // 主平行光：投射阴影，给模型带来体积感与立体感
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.15);
     dirLight.position.set(20, 40, 15);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.set(2048, 2048);
@@ -150,7 +150,7 @@ export class Game {
     this._dnSun = dirLight;
     this._dnAmbient = ambient;
     this._dnState = {
-      time: 0.40,
+      time: 0.46,
       dayLength: 240,
       weather: 'clear',
       nextWeatherAt: 45,

@@ -37,7 +37,7 @@ html, body {
   inset: 0;
   pointer-events: none;
   z-index: 5;
-  background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 50%, rgba(0,0,0,0.14) 78%, rgba(0,0,0,0.32) 100%);
+  background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 62%, rgba(0,0,0,0.05) 84%, rgba(0,0,0,0.13) 100%);
 }
 
 .hidden { display: none !important; }
@@ -1651,7 +1651,7 @@ html, body {
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   background:
-    radial-gradient(circle at 50% 45%, rgba(38, 50, 62, 0.30), rgba(3, 5, 8, 0.72) 78%);
+    radial-gradient(circle at 50% 45%, rgba(46, 60, 74, 0.20), rgba(10, 16, 24, 0.45) 78%);
   backdrop-filter: blur(1px);
 }
 .lh-entry-card {

@@ -48,8 +48,8 @@ export const LOBBY_STATIONS = [
 export class LobbyScene {
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x06080b);
-    this.scene.fog = new THREE.Fog(0x06080b, 17, 34);
+    this.scene.background = new THREE.Color(0x202b38);
+    this.scene.fog = new THREE.Fog(0x202b38, 22, 46);
 
     this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 60);
     this.camera.rotation.order = 'YXZ';
@@ -82,9 +82,9 @@ export class LobbyScene {
 
   // ==================== 构建：灯光 ====================
   _buildLights() {
-    this.scene.add(new THREE.HemisphereLight(0x9ab4cc, 0x0d1116, 2.4));
+    this.scene.add(new THREE.HemisphereLight(0xb8cfe6, 0x2c3642, 3.0));
 
-    const key = new THREE.DirectionalLight(0xfff0d6, 2.8);
+    const key = new THREE.DirectionalLight(0xfff0d6, 3.4);
     key.position.set(6, 12, 8);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -100,14 +100,14 @@ export class LobbyScene {
 
     // 顶灯：沿着大厅中轴排布，暖白偏黄，营造"车库基地"的氛围
     for (const z of [-5.2, -1.4, 2.4, 6.2]) {
-      const lamp = new THREE.PointLight(0xffd9a0, 26, 18, 2);
+      const lamp = new THREE.PointLight(0xffd9a0, 34, 20, 2);
       lamp.position.set(0, ROOM.height - 0.55, z);
       this.scene.add(lamp);
     }
 
     // 两侧冷色补光，把设施从暗部里托出来
     for (const sx of [-1, 1]) {
-      const fill = new THREE.PointLight(0x3d7ab5, 12, 16, 2);
+      const fill = new THREE.PointLight(0x3d7ab5, 16, 18, 2);
       fill.position.set(sx * 8.4, 3.4, 0);
       this.scene.add(fill);
     }
@@ -145,9 +145,9 @@ export class LobbyScene {
   }
 
   _buildRoom() {
-    const floorMat = this._mat(0x182029, { roughness: 0.92, metalness: 0.12 });
-    const wallMat = this._mat(0x27313c, { roughness: 0.85, metalness: 0.2 });
-    const trimMat = this._mat(0x33404c, { roughness: 0.5, metalness: 0.55 });
+    const floorMat = this._mat(0x2e3a46, { roughness: 0.92, metalness: 0.12 });
+    const wallMat = this._mat(0x46525e, { roughness: 0.85, metalness: 0.2 });
+    const trimMat = this._mat(0x5c6a78, { roughness: 0.5, metalness: 0.55 });
 
     // 地板
     const floor = this._box(ROOM.halfW * 2, 0.3, ROOM.halfD * 2, floorMat, 0, -0.15, 0);
@@ -156,7 +156,7 @@ export class LobbyScene {
     // 中央圆形停机坪纹样
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(3.4, 48),
-      this._mat(0x121a24, { roughness: 0.8, metalness: 0.25, transparent: true, opacity: 0.9 }),
+      this._mat(0x26323e, { roughness: 0.8, metalness: 0.25, transparent: true, opacity: 0.9 }),
     );
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = 0.005;
@@ -213,7 +213,7 @@ export class LobbyScene {
     }
 
     // 天花板
-    this._box(ROOM.halfW * 2, 0.3, ROOM.halfD * 2, this._mat(0x1a232c, { roughness: 0.95, metalness: 0.1 }),
+    this._box(ROOM.halfW * 2, 0.3, ROOM.halfD * 2, this._mat(0x333f4a, { roughness: 0.95, metalness: 0.1 }),
       0, ROOM.height + 0.15, 0, this.scene, { cast: false });
 
     // 天花横梁 + 灯管
